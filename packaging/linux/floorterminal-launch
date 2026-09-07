@@ -1,0 +1,117 @@
+#!/bin/sh
+# FloorTerminal supervised launcher and update boot watchdog.
+#
+# The service manager starts this script instead of the application so that a
+# version which cannot start is detected and undone without anyone visiting the
+# terminal. It counts supervised start attempts while a newly activated version is
+# on probation and restores the previous version once the attempts are exhausted.
+#
+# Design rules, in order of importance:
+#   1. It must never prevent the terminal from starting. Every failure path still
+#      reaches the application.
+#   2. It never reads, trusts, or executes anything from removable media.
+#   3. It never evaluates the state file. The file is parsed field by field and
+#      every value is validated against a strict character set before use.
+#   4. Version switching is a rename of one symbolic link, which is atomic.
+#
+# The deployment root is derived from this script's own location, so the launcher
+# cannot be pointed at another tree through the environment.
+
+set -eu
+
+APP_NAME="floorterminal"
+BIN_DIR=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -P -- "$BIN_DIR/.." && pwd)
+APP="$ROOT/$APP_NAME"
+UPDATE_DIR="$ROOT/update"
+STATE="$UPDATE_DIR/boot_state"
+LOG="$UPDATE_DIR/update-log.jsonl"
+
+STATUS=""
+ACTIVE=""
+PREVIOUS=""
+ATTEMPTS=0
+LIMIT=3
+
+timestamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+log_event() {
+    # $1 event, $2 level, $3 detail
+    [ -d "$UPDATE_DIR" ] || return 0
+    printf '{"event":"%s","level":"%s","product":"floorterminal","source":"launcher","timestamp":"%s","from_version":"%s","to_version":"%s","attempts":%s,"detail":"%s"}\n' \
+        "$1" "$2" "$(timestamp)" "$ACTIVE" "$PREVIOUS" "$ATTEMPTS" "$3" >> "$LOG" 2>/dev/null || true
+    chmod 600 "$LOG" 2>/dev/null || true
+}
+
+write_state() {
+    # $1 status, $2 active, $3 previous, $4 attempts
+    [ -d "$UPDATE_DIR" ] || return 0
+    tmp="$STATE.$$"
+    {
+        printf 'SCHEMA=1\n'
+        printf 'STATUS=%s\n' "$1"
+        printf 'ACTIVE=%s\n' "$2"
+        printf 'PREVIOUS=%s\n' "$3"
+        printf 'ATTEMPTS=%s\n' "$4"
+        printf 'LIMIT=%s\n' "$LIMIT"
+        printf 'UPDATED=%s\n' "$(timestamp)"
+    } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
+    chmod 600 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$STATE" 2>/dev/null || rm -f "$tmp"
+}
+
+# --- read the previous boot state -----------------------------------------
+if [ -r "$STATE" ]; then
+    while IFS='=' read -r key value; do
+        case "$key" in
+            STATUS) STATUS=$value ;;
+            ACTIVE) ACTIVE=$value ;;
+            PREVIOUS) PREVIOUS=$value ;;
+            ATTEMPTS) ATTEMPTS=$value ;;
+            LIMIT) LIMIT=$value ;;
+        esac
+    done < "$STATE"
+fi
+
+# Reject anything that is not a plain number or a plain version-slot name. A
+# damaged or hostile state file therefore degrades to "start normally".
+case "$ATTEMPTS" in ''|*[!0-9]*) ATTEMPTS=0 ;; esac
+case "$LIMIT" in ''|*[!0-9]*) LIMIT=3 ;; esac
+case "$ACTIVE" in *[!0-9A-Za-z.-]*) ACTIVE="" ;; esac
+case "$PREVIOUS" in *[!0-9A-Za-z.-]*) PREVIOUS="" ;; esac
+[ "$LIMIT" -ge 1 ] 2>/dev/null || LIMIT=3
+
+# --- probation accounting and automatic rollback ---------------------------
+if [ "$STATUS" = "probation" ] && [ -L "$APP" ]; then
+    ATTEMPTS=$((ATTEMPTS + 1))
+    ROLLBACK_TARGET="$ROOT/versions/$PREVIOUS/$APP_NAME"
+    if [ "$ATTEMPTS" -gt "$LIMIT" ] && [ -n "$PREVIOUS" ] && [ -f "$ROLLBACK_TARGET" ]; then
+        tmp_link="$ROOT/.$APP_NAME.watchdog"
+        rm -f "$tmp_link"
+        if ln -s "versions/$PREVIOUS/$APP_NAME" "$tmp_link" 2>/dev/null &&
+           mv -f "$tmp_link" "$APP" 2>/dev/null; then
+            log_event "update_watchdog_rollback" "ERROR" \
+                "New version did not start within the permitted attempts"
+            write_state "rolled_back" "$PREVIOUS" "$ACTIVE" 0
+        else
+            rm -f "$tmp_link"
+            log_event "update_watchdog_rollback_failed" "ERROR" \
+                "Could not restore the previous version; starting the active one"
+            write_state "probation" "$ACTIVE" "$PREVIOUS" "$ATTEMPTS"
+        fi
+    else
+        write_state "probation" "$ACTIVE" "$PREVIOUS" "$ATTEMPTS"
+    fi
+fi
+
+# --- hand over to the application -----------------------------------------
+# Deployment data always lives at the root, never inside a version slot.
+FLOORTERMINAL_HOME="$ROOT"
+FLOORTERMINAL_SUPERVISED=1
+export FLOORTERMINAL_HOME FLOORTERMINAL_SUPERVISED
+
+if [ ! -x "$APP" ]; then
+    echo "floorterminal: no runnable application at $APP" >&2
+    exit 78
+fi
+exec "$APP" "$@"

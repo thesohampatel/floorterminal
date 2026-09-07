@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">FloorTerminal operational response mark</title>
+  <desc id="desc">A touch point surrounded by four stages representing a production fault, alert, coordinated response, and restored production flow.</desc>
+
+  <!--
+    FloorTerminal brand mark
+
+    The four clockwise stages are:
+      coral   — production fault
+      amber   — operator report / alert
+      violet  — coordinated response and work
+      emerald — production restored
+
+    This master intentionally uses only flat fills and strokes. The canvas is
+    transparent, and all geometry remains readable at launcher-icon sizes.
+  -->
+  <g fill="none" stroke-width="176" stroke-linecap="butt">
+    <path d="M 214.92 378.25 A 300 300 0 0 1 470.25 122.92" stroke="#FF5A4F"/>
+    <path d="M 553.75 122.92 A 300 300 0 0 1 809.08 378.25" stroke="#FFB62E"/>
+    <path d="M 809.08 461.75 A 300 300 0 0 1 553.75 717.08" stroke="#6337D6"/>
+    <path d="M 470.25 717.08 A 300 300 0 0 1 214.92 461.75" stroke="#159A72"/>
+  </g>
+
+  <!-- Fault: a deliberately interrupted production trace. -->
+  <path
+    d="M 250 201 L 272 179 L 294 201 L 316 179"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="22"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M 272 244 L 294 222 L 316 244 L 338 222"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="22"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Alert / report. -->
+  <path d="M 726 176 V 245" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="726" cy="285" r="16" fill="#FFFFFF"/>
+
+  <!-- Production resumes and moves forward. -->
+  <path d="M 214 571 L 279 626 L 214 681 Z" fill="#FFFFFF"/>
+  <path d="M 280 571 L 345 626 L 280 681 Z" fill="#FFFFFF"/>
+
+  <!-- Coordinated response waves. -->
+  <path d="M 695 548 Q 758 570 786 622" fill="none" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round"/>
+  <path d="M 703 596 Q 746 611 765 650" fill="none" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round"/>
+  <path d="M 713 642 Q 735 650 747 671" fill="none" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round"/>
+
+  <!-- Central operator touch target. -->
+  <circle cx="512" cy="420" r="174" fill="#FFFFFF"/>
+  <circle cx="512" cy="420" r="150" fill="#102746"/>
+  <circle cx="512" cy="420" r="70" fill="#FFB52A"/>
+
+  <!-- Simplified universal touch gesture. -->
+  <path
+    d="M 512 394
+       C 489 394 472 412 472 437
+       V 676
+       L 440 648
+       C 417 628 382 630 361 653
+       C 340 676 343 710 365 730
+       L 407 827
+       C 428 881 479 914 538 914
+       H 614
+       C 696 914 760 850 760 768
+       V 716
+       C 760 678 729 647 690 647
+       H 618
+       C 594 644 570 650 552 665
+       V 437
+       C 552 412 535 394 512 394
+       Z"
+    fill="#FFB52A"
+    stroke="#FFFFFF"
+    stroke-width="20"
+    stroke-linejoin="round"
+  />
+</svg>

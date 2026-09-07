@@ -1,0 +1,49 @@
+{
+  "archive": {
+    "name": "floorterminal-v1.0.0-linux-arm64.tar.gz",
+    "sha256": "94128796538fdda8d1a676e7c6a5ebbff068e4fce19ea0f790ffc0ea9eb1fcae"
+  },
+  "document_type": "update_channel",
+  "product_id": "floorterminal",
+  "published_utc": "2026-09-07T21:24:38Z",
+  "release": {
+    "artifact": {
+      "name": "floorterminal",
+      "sha256": "7e37e17d64f746d69bd56ab359482a7d46b5a88d56288be96462ef1bfaf1018c",
+      "size_bytes": 13922536
+    },
+    "features": [
+      "Station-specific failure selection and local-first incident reporting",
+      "Response coordination, repair timing and capability-based connectors",
+      "Responsive kiosk screens, meaningful animation and optional original sounds",
+      "Signed offline updates, protected Settings and structured operational logs",
+      "Public initial Settings access with installation-local password changes"
+    ],
+    "fixes": [
+      "Update availability and release links use the canonical public repository",
+      "Clearer station badges, timer spacing and modal backgrounds",
+      "Native-resolution screenshots and independently checked touchscreen layouts",
+      "Managed direct launches retain the correct deployment data root",
+      "Robust connector error handling for JSON arrays and scalar responses",
+      "Select the newest compatible signed USB release across multiple drives or version folders"
+    ],
+    "minimum_upgradable_version": "1.0.0",
+    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.0.0",
+    "release_summary": "First open-source release of the line-side reporting and first-response touchscreen console.",
+    "release_title": "FloorTerminal 1.0.0",
+    "released_utc": "2026-09-07T21:24:38Z",
+    "security": [
+      "Credential-free distribution with strict connector validation",
+      "Verified update signatures, artifact digests and build-input fingerprints",
+      "Changed local passwords replace initial access across every protected control",
+      "Retained signed update evidence is revalidated before activation",
+      "Offline transport guards, redacted errors and source-matched publication auditing",
+      "Bind approval to version and payload; reauthenticate cached metadata and exclude failed rollback targets"
+    ],
+    "version": "1.0.0"
+  },
+  "schema_version": 1,
+  "targets": [
+    "linux/aarch64"
+  ]
+}

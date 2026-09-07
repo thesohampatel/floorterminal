@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "product_name": "FloorTerminal",
+  "product_short_name": "FloorTerminal",
+  "product_tagline": "Line-side reporting and first-response terminal",
+  "maintainer_name": "Soham Patel",
+  "distribution_name": "Open-source distribution",
+  "support_contact": "sohampatel1782@gmail.com",
+  "license_name": "MIT License",
+  "license_identifier": "MIT",
+  "license_version": "Standard",
+  "license_summary": "Open-source use, copying, modification, distribution, sublicensing, and sale are permitted with the MIT notice retained.",
+  "copyright_notice": "Copyright (c) 2026 Soham Patel and contributors",
+  "legal_notice": "Open-source software under the MIT License. Provided as-is; operators remain responsible for safety procedures, configuration, credentials, and third-party services.",
+  "settings_password": "admin@123"
+}

@@ -1,0 +1,7 @@
+# Maintainer review for release, security and application changes.
+/src/ @thesohampatel
+/scripts/ @thesohampatel
+/.github/ @thesohampatel
+/maintainer_keys/ @thesohampatel
+/update-channel/ @thesohampatel
+/LICENSE @thesohampatel

@@ -1,0 +1,94 @@
+{
+  "line_name": "Demonstration Line",
+  "location_id": "",
+  "asset_id": "",
+  "zones": [
+    "Station 1",
+    "Station 2",
+    "Station 3",
+    "Station 4",
+    "Station 5",
+    "Station 6"
+  ],
+  "station_failure_types": {
+    "Station 1": [
+      "Mechanical",
+      "Electrical",
+      "Material / Flow",
+      "Sensor / Control"
+    ],
+    "Station 2": [
+      "Mechanical",
+      "Electrical",
+      "Material / Flow",
+      "Sensor / Control"
+    ],
+    "Station 3": [
+      "Mechanical",
+      "Electrical",
+      "Material / Flow",
+      "Sensor / Control"
+    ],
+    "Station 4": [
+      "Mechanical",
+      "Electrical",
+      "Material / Flow",
+      "Sensor / Control"
+    ],
+    "Station 5": [
+      "Mechanical",
+      "Electrical",
+      "Material / Flow",
+      "Sensor / Control"
+    ],
+    "Station 6": [
+      "Mechanical",
+      "Electrical",
+      "Material / Flow",
+      "Sensor / Control"
+    ]
+  },
+  "engineering_team_name": "",
+  "engineering_chat_name": "",
+  "quality_chat_name": "",
+  "production_chat_name": "",
+  "common_activity_chat_name": "",
+  "escalation_chat_name": "",
+  "response_record_priority": "HIGH",
+  "response_record_type": "REACTIVE",
+  "planned_work_priority": "MEDIUM",
+  "asset_status_tracking": false,
+  "fullscreen_on_linux": true,
+  "animation_interval_ms": 80,
+  "sound_enabled": true,
+  "sound_volume": 70,
+  "sound_cooldown_ms": 750,
+  "software_update_check_enabled": true,
+  "directory_max_pages": 3,
+  "escalation_minutes": 15,
+  "micro_stop_threshold_minutes": 5,
+  "ui_language": "en",
+  "ui_color_preset": "standard",
+  "log_directory": "logs",
+  "log_level": "INFO",
+  "log_retention_days": 183,
+  "log_storage_reserve_mb": 512,
+  "log_daily_growth_floor_mb": 2,
+  "downtime_title_template": "UNPLANNED DOWNTIME • {line} • {zones} • {time}",
+  "downtime_description_template": "Unplanned downtime reported from the {line} touchscreen at {timestamp}. Line response required.",
+  "help_message_template": "🚨 {department} assistance requested at {line}. Stations: {zones}. Line-side support is needed; {condition}. Request sent at {timestamp}.",
+  "planned_work_title_template": "PLANNED • {work_label} • {line} • {zones} • {time}",
+  "planned_work_description_template": "Engineering took control of {line} for {work_label} at {timestamp}. Production is paused until Engineering releases the line.",
+  "ui_colors": {
+    "background": "#F3F5F9",
+    "card": "#FFFFFF",
+    "text": "#14213D",
+    "muted": "#718096",
+    "red": "#E84855",
+    "green": "#16A36A",
+    "blue": "#246BFD",
+    "orange": "#F09A3E",
+    "purple": "#7956D8",
+    "border": "#E3E8F1"
+  }
+}

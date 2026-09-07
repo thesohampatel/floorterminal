@@ -1,0 +1,1 @@
+"""Original operational sound assets."""

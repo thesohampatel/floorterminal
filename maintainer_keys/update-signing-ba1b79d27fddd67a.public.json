@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "key_id": "ba1b79d27fddd67a",
+  "algorithm": "ed25519",
+  "created_utc": "2026-09-03T02:48:56Z",
+  "public_key_base64": "Ff8PJdWWQ5r5GsQZLQpBvq7fz/3WN4Th4DXpW2mYN1I=",
+  "purpose": "FloorTerminal offline software-update release signing"
+}

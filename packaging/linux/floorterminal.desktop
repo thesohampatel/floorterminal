@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=FloorTerminal
+Comment=Production line response and reporting terminal
+Path=/opt/floorterminal
+Exec=/usr/bin/systemctl --user restart floorterminal.service
+Icon=/opt/floorterminal/floorterminal-icon.png
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

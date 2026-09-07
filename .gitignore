@@ -1,0 +1,60 @@
+# Secrets and production runtime data
+config.json
+connector.json
+project_profile.json
+auth_throttle.json
+response_state.json
+logs/
+.active_connector
+.env
+.env.*
+*.pem
+*.key
+api*.txt
+*.connector.json
+*_connector.json
+*-connector.json
+connector-*.json
+connector_*.json
+BUILD_HISTORY.jsonl
+build_history/*
+!build_history/README.md
+deployment_profiles/*.json
+!deployment_profiles/deployment.example.json
+
+# Offline release-signing keys. The private seed authorizes software updates for
+# every deployed terminal; keep it on offline maintainer storage only.
+maintainer_keys/*
+!maintainer_keys/README.md
+!maintainer_keys/*.public.json
+*.private.json
+
+# Managed installation state created beside a running application. The leading
+# slash keeps the tracked src/floorterminal/update package out of scope.
+/update/
+/versions/
+/boot_state
+
+# Python caches and local tooling
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.coverage
+.coverage.*
+htmlcov/
+
+# Native build and release artifacts
+/build/
+/dist/
+/pi_build_output/
+*.spec
+
+# Operating-system and editor metadata
+.DS_Store
+Thumbs.db
+.vscode/
+settings_auth.json
+**/floorterminal_key/

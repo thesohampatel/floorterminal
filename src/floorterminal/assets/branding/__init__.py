@@ -1,0 +1,1 @@
+"""Packaged FloorTerminal identity assets."""

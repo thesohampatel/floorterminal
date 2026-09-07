@@ -1,0 +1,28 @@
+{
+  "release_title": "FloorTerminal 1.0.0",
+  "release_summary": "First open-source release of the line-side reporting and first-response touchscreen console.",
+  "minimum_upgradable_version": "1.0.0",
+  "features": [
+    "Station-specific failure selection and local-first incident reporting",
+    "Response coordination, repair timing and capability-based connectors",
+    "Responsive kiosk screens, meaningful animation and optional original sounds",
+    "Signed offline updates, protected Settings and structured operational logs",
+    "Public initial Settings access with installation-local password changes"
+  ],
+  "fixes": [
+    "Update availability and release links use the canonical public repository",
+    "Clearer station badges, timer spacing and modal backgrounds",
+    "Native-resolution screenshots and independently checked touchscreen layouts",
+    "Managed direct launches retain the correct deployment data root",
+    "Robust connector error handling for JSON arrays and scalar responses",
+    "Select the newest compatible signed USB release across multiple drives or version folders"
+  ],
+  "security": [
+    "Credential-free distribution with strict connector validation",
+    "Verified update signatures, artifact digests and build-input fingerprints",
+    "Changed local passwords replace initial access across every protected control",
+    "Retained signed update evidence is revalidated before activation",
+    "Offline transport guards, redacted errors and source-matched publication auditing",
+    "Bind approval to version and payload; reauthenticate cached metadata and exclude failed rollback targets"
+  ]
+}

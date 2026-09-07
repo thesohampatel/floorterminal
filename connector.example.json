@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "contract": {
+    "name": "FloorTerminal External Connector",
+    "version": "1.0",
+    "purpose": "User-managed boundary between the terminal and one external operations service"
+  },
+  "enabled": false,
+  "identity": {
+    "display_name": "Configured Operations System",
+    "description": "User-supplied maintenance workflow integration",
+    "authenticated_subject_id": ""
+  },
+  "connection": {
+    "protocol": "rest",
+    "base_url": "",
+    "timeout_seconds": 15,
+    "requests_per_minute": 10,
+    "allowed_hosts": []
+  },
+  "credentials": {
+    "access_token": "",
+    "tenant_id": ""
+  },
+  "authentication": {
+    "type": "bearer",
+    "required_credentials": ["access_token"],
+    "optional_headers": ["X-Tenant-Id"],
+    "headers": {
+      "Authorization": "Bearer ${access_token}",
+      "X-Tenant-Id": "${tenant_id}"
+    },
+    "query": {},
+    "body": {},
+    "derived_credentials": {}
+  },
+  "capabilities": {
+    "response_records": true,
+    "response_record_status": true,
+    "response_record_comments": true,
+    "response_record_assignments": true,
+    "asset_status": true,
+    "messaging": true,
+    "team_directory": true
+  },
+  "diagnostics": {
+    "test_operation": "user.list",
+    "query": {"limit": 1}
+  },
+  "workflow": {
+    "operations": {
+      "load_user": "identity.get",
+      "list_users": "user.list",
+      "list_teams": "team.list",
+      "list_team_members": "team.members",
+      "list_conversations": "conversation.list",
+      "create_response_record": "response_record.create",
+      "update_response_record": "response_record.assign",
+      "update_response_record_status": "response_record.status",
+      "create_response_record_comment": "response_record.comment",
+      "create_asset_status": "asset.status",
+      "send_conversation_message": "conversation.message",
+      "send_user_message": "user.message"
+    },
+    "collections": {
+      "users": "users",
+      "teams": "teams",
+      "members": "members",
+      "conversations": "conversations"
+    },
+    "objects": {
+      "created_response_record": "",
+      "loaded_identity": ""
+    },
+    "fields": {
+      "id": "id",
+      "response_record_id": "id",
+      "response_record_reference": "reference",
+      "name": "name",
+      "first_name": "firstName",
+      "last_name": "lastName",
+      "next_cursor": "nextCursor",
+      "title": "title",
+      "description": "description",
+      "priority": "priority",
+      "work_type": "type",
+      "assignees": "assignees",
+      "assignee_type": "type",
+      "assignee_id": "id",
+      "asset_id": "assetId",
+      "location_id": "locationId",
+      "response_record_status": "status",
+      "asset_status": "status",
+      "downtime_type": "downtimeType",
+      "status_description": "description",
+      "started_at": "startedAt",
+      "content": "content"
+    },
+    "field_types": {
+      "asset_id": "string",
+      "location_id": "string",
+      "assignee_id": "string"
+    },
+    "values": {
+      "priority": {"NONE": "NONE", "LOW": "LOW", "MEDIUM": "MEDIUM", "HIGH": "HIGH"},
+      "work_type": {"REACTIVE": "REACTIVE", "PREVENTIVE": "PREVENTIVE", "OTHER": "OTHER"},
+      "assignee_type": {"TEAM": "TEAM", "USER": "USER"},
+      "response_record_status": {"IN_PROGRESS": "IN_PROGRESS", "DONE": "DONE"},
+      "asset_status": {"ONLINE": "ONLINE", "OFFLINE": "OFFLINE", "IGNORE": "IGNORE"},
+      "downtime_type": {"PLANNED": "PLANNED", "UNPLANNED": "UNPLANNED"}
+    }
+  },
+  "operations": {
+    "identity.get": {"method": "GET", "path": "/users/{id}", "query_parameters": [], "success_codes": [200]},
+    "user.list": {"method": "GET", "path": "/users", "query_parameters": ["limit", "cursor"], "success_codes": [200]},
+    "team.list": {"method": "GET", "path": "/teams", "query_parameters": ["limit", "cursor"], "success_codes": [200]},
+    "team.members": {"method": "GET", "path": "/teams/{id}/members", "query_parameters": ["limit", "cursor"], "success_codes": [200]},
+    "conversation.list": {"method": "GET", "path": "/conversations", "query_parameters": ["limit", "cursor", "onlyNamed"], "success_codes": [200]},
+    "response_record.create": {"method": "POST", "path": "/response-records", "query_parameters": [], "success_codes": [200, 201], "idempotency": {"location": "header", "name": "Idempotency-Key", "remote_guarantee": true}},
+    "response_record.assign": {"method": "PATCH", "path": "/response-records/{id}", "query_parameters": [], "success_codes": [200]},
+    "response_record.status": {"method": "PATCH", "path": "/response-records/{id}/status", "query_parameters": [], "success_codes": [200]},
+    "response_record.comment": {"method": "POST", "path": "/response-records/{id}/comments", "query_parameters": [], "success_codes": [200, 201]},
+    "asset.status": {"method": "POST", "path": "/assets/{assetId}/status", "query_parameters": [], "success_codes": [200, 201], "idempotency": {"location": "header", "name": "Idempotency-Key", "remote_guarantee": true}},
+    "conversation.message": {"method": "POST", "path": "/conversations/{id}/messages", "query_parameters": [], "success_codes": [200, 201]},
+    "user.message": {"method": "POST", "path": "/users/{id}/messages", "query_parameters": [], "success_codes": [200, 201]}
+  },
+  "response": {
+    "rate_limit_headers": {"limit": "X-Rate-Limit-Limit", "remaining": "X-Rate-Limit-Remaining", "reset_seconds": "X-Rate-Limit-Reset"},
+    "error_status_map": {"400": "INVALID_REQUEST", "401": "AUTHENTICATION", "403": "PERMISSION", "404": "NOT_FOUND", "409": "CONFLICT", "429": "RATE_LIMITED", "500": "SERVER", "502": "UNAVAILABLE", "503": "UNAVAILABLE"}
+  }
+}

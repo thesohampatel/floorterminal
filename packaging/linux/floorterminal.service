@@ -1,0 +1,45 @@
+[Unit]
+Description=FloorTerminal production kiosk
+After=graphical-session.target network-online.target
+Wants=network-online.target
+PartOf=graphical-session.target
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/floorterminal
+Environment=PYTHONUNBUFFERED=1
+Environment=DISPLAY=:0
+ExecStart=/opt/floorterminal/bin/floorterminal-launch
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+# Direct ALSA playback is the documented fallback when the graphical session has
+# no Pulse/PipeWire compatibility service. This user unit therefore retains the
+# kiosk account's existing device permissions; it receives no added capability.
+PrivateDevices=false
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/floorterminal
+# Optional: lets an authorized update write its record back to the update
+# drive. The '-' prefix keeps the unit valid on systems without these paths.
+ReadWritePaths=-/media
+ReadWritePaths=-/run/media
+LockPersonality=true
+RestrictSUIDSGID=true
+UMask=0077
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target
