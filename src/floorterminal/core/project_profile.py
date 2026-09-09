@@ -55,23 +55,24 @@ _SOURCE_PASSWORD_FIELD = "settings_password"
 _EMBEDDED_PASSWORD_FIELD = "settings_password_hash"
 _PASSWORD_ENV = "FLOORTERMINAL_SETTINGS_PASSWORD"
 _PASSWORD_PLACEHOLDER = "${FLOORTERMINAL_SETTINGS_PASSWORD}"
-_PASSWORD_SCHEME = "pbkdf2_sha256"
-_PASSWORD_ITERATIONS = 600_000
+# Public key-derivation metadata, not password material.
+_KDF_SCHEME = "pbkdf2_sha256"
+_KDF_ITERATIONS = 600_000
 _FORBIDDEN_PASSWORDS = {"CHANGE_THIS_BEFORE_BUILD"}
 
 
 def hash_settings_password(password, salt=None):
     salt = salt or secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt, _PASSWORD_ITERATIONS
+        "sha256", password.encode("utf-8"), salt, _KDF_ITERATIONS
     )
-    return f"{_PASSWORD_SCHEME}${_PASSWORD_ITERATIONS}${salt.hex()}${digest.hex()}"
+    return f"{_KDF_SCHEME}${_KDF_ITERATIONS}${salt.hex()}${digest.hex()}"
 
 
 def verify_settings_password(password, encoded):
     try:
         scheme, iterations, salt, expected = encoded.split("$", 3)
-        if scheme != _PASSWORD_SCHEME or int(iterations) != _PASSWORD_ITERATIONS:
+        if scheme != _KDF_SCHEME or int(iterations) != _KDF_ITERATIONS:
             return False
         actual = hashlib.pbkdf2_hmac(
             "sha256", password.encode("utf-8"), bytes.fromhex(salt), int(iterations)
@@ -162,7 +163,7 @@ def load_project_profile(path=None) -> ProjectProfile:
         values[_EMBEDDED_PASSWORD_FIELD] = hash_settings_password(password)
     else:
         password_hash = str(data[_EMBEDDED_PASSWORD_FIELD])
-        pattern = rf"{_PASSWORD_SCHEME}\${_PASSWORD_ITERATIONS}\$[0-9a-f]{{32}}\$[0-9a-f]{{64}}"
+        pattern = rf"{_KDF_SCHEME}\${_KDF_ITERATIONS}\$[0-9a-f]{{32}}\$[0-9a-f]{{64}}"
         if not re.fullmatch(pattern, password_hash):
             raise ProjectProfileError("settings_password_hash must be a valid PBKDF2 hash")
         values[_EMBEDDED_PASSWORD_FIELD] = password_hash

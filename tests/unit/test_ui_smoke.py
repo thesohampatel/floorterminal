@@ -98,7 +98,7 @@ class TouchscreenSmokeTests(unittest.TestCase):
         )
 
     def test_password_change_masks_input_and_returns_to_settings(self):
-        self.assertTrue(self.result.get("password_changed"))
+        self.assertTrue(self.result.get("access_change_verified"))
 
 
 if __name__ == "__main__":

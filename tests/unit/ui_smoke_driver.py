@@ -320,7 +320,7 @@ def main():
             raise AssertionError("Changed password did not work")
         if app.settings_credentials.verify("ui-smoke-driver-secret"):
             raise AssertionError("Initial password still worked after change")
-        password_changed = True
+        access_change_verified = True
 
         settings_tabs_checked = 0
         for index, tab_id in enumerate(settings.tabs.tabs()):
@@ -372,7 +372,7 @@ def main():
         settings_saved = True
     except Exception:
         settings_saved = False
-        password_changed = False
+        access_change_verified = False
         settings_tabs_checked = 0
         record("settings save", traceback.format_exc(limit=4))
 
@@ -499,7 +499,7 @@ def main():
                 "pressed": pressed,
                 "settings_saved": settings_saved,
                 "settings_tabs_checked": settings_tabs_checked,
-                "password_changed": password_changed,
+                "access_change_verified": access_change_verified,
                 "collisions": collisions,
                 "faults": faults,
             }
