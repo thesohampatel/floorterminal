@@ -1,16 +1,16 @@
 {
   "archive": {
     "name": "floorterminal-v1.0.0-linux-arm64.tar.gz",
-    "sha256": "94128796538fdda8d1a676e7c6a5ebbff068e4fce19ea0f790ffc0ea9eb1fcae"
+    "sha256": "1ddb3613fc0a9aa83f8596a74a6fbdd649e142d620346165ded6d21255414339"
   },
   "document_type": "update_channel",
   "product_id": "floorterminal",
-  "published_utc": "2026-09-07T21:24:38Z",
+  "published_utc": "2026-09-09T02:50:56Z",
   "release": {
     "artifact": {
       "name": "floorterminal",
-      "sha256": "7e37e17d64f746d69bd56ab359482a7d46b5a88d56288be96462ef1bfaf1018c",
-      "size_bytes": 13922536
+      "sha256": "fcb53cc376261d5fdb5011b09451da9edfdf28a3f2e69f2713f1b8e914265cc9",
+      "size_bytes": 13921288
     },
     "features": [
       "Station-specific failure selection and local-first incident reporting",
@@ -31,7 +31,7 @@
     "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.0.0",
     "release_summary": "First open-source release of the line-side reporting and first-response touchscreen console.",
     "release_title": "FloorTerminal 1.0.0",
-    "released_utc": "2026-09-07T21:24:38Z",
+    "released_utc": "2026-09-09T02:50:56Z",
     "security": [
       "Credential-free distribution with strict connector validation",
       "Verified update signatures, artifact digests and build-input fingerprints",
