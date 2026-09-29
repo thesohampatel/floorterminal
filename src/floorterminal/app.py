@@ -688,7 +688,8 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
                     )
             elif key == "confirm":
                 kind = self.modal.get("kind")
-                requested_at = self.modal.get("requested_at")
+                # Timestamp the affirmative touch, not when the dialog opened.
+                requested_at = time.time()
                 self.modal = None
                 if kind == "confirm_downtime":
                     self.logger.log("downtime_confirmation_accepted")

@@ -61,10 +61,17 @@ timekeeping, payroll, or shift reporting.
 
 Support controls send contextual messages and do not create response records. If
 the connector's request budget is momentarily exhausted, the request is queued and
-sent automatically within 15 minutes; after that it is discarded as stale, and the
-operator should use the site's usual escalation route. Station
+retried for up to 15 minutes; delivery is not guaranteed. After that it is
+discarded as stale. Use the site's usual escalation route if help has not arrived. Station
 selection is optional. Planned Engineering work requires an affected selection and
 uses distinct text/status while following the same responder and restoration process.
+
+A completion message reports **DONE** only after successful external acceptance.
+If that update is still queued, it says so. If a queued update expired, was rejected,
+or was dropped at the queue limit, it says **DONE not confirmed**; check and reconcile
+the external record. Local Production release and external synchronization are
+separate facts. The release time is captured when **Yes, confirm** is pressed, not
+when the confirmation dialog opens.
 
 ## Offline and recovery behavior
 

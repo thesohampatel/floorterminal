@@ -149,5 +149,27 @@ class ErrorPanelTests(unittest.TestCase):
         self.assertIn("mystery", describe_control("mystery"))
 
 
+
+class ConfirmationTimestampTests(unittest.TestCase):
+    def test_opening_confirmation_does_not_record_a_release_time(self):
+        instance = app()
+        instance.confirm_done()
+        self.assertNotIn("requested_at", instance.modal)
+        self.assertIsNone(instance.state["completion_confirmed_at"])
+
+    def test_affirmative_touch_time_is_kept_even_if_worker_runs_later(self):
+        from unittest.mock import patch
+
+        instance = app()
+        instance.confirm_done()
+        queued, confirmed = [], []
+        instance.perform = lambda _operation, function, **_kwargs: queued.append(function)
+        instance.finish_work = lambda stamp: confirmed.append(stamp)
+        with patch("floorterminal.app.time.time", return_value=200.0):
+            touch(instance, "confirm")
+        with patch("floorterminal.app.time.time", return_value=900.0):
+            queued[0]()
+        self.assertEqual(confirmed, [200.0])
+
 if __name__ == "__main__":
     unittest.main()

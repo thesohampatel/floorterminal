@@ -353,6 +353,7 @@ class WorkflowMixin:
             victim = next(
                 (item for item in queue if item.get("action") != "status"), queue[0]
             )
+            self._mark_completion_outcome(victim, "failed")
             queue.remove(victim)
             self.logger.log(
                 event,
@@ -410,6 +411,14 @@ class WorkflowMixin:
         self._trim_queue(queue, MAX_QUEUED_RECORD_UPDATES, "record_update_dropped")
         return entry
 
+    def _mark_completion_outcome(self, update, outcome):
+        """Keep delivery evidence with queued completion messages, across restarts."""
+        if update.get("action") != "status" or update.get("status") != "DONE":
+            return
+        for message in self.state.get("pending_messages") or []:
+            if message.get("status_record_id") == update.get("record_id"):
+                message["record_status_outcome"] = outcome
+
     def flush_record_updates(self, force=False):
         """Deliver queued record updates in order; True when none remain.
 
@@ -423,6 +432,7 @@ class WorkflowMixin:
             return False
         for entry in list(queue):
             if self._queue_entry_expired(entry):
+                self._mark_completion_outcome(entry, "failed")
                 queue.remove(entry)
                 self.logger.log(
                     "record_update_expired",
@@ -463,6 +473,7 @@ class WorkflowMixin:
                     error=entry["last_error"],
                 )
                 if give_up:
+                    self._mark_completion_outcome(entry, "failed")
                     queue.remove(entry)
                     self.logger.log(
                         "record_update_abandoned",
@@ -477,6 +488,7 @@ class WorkflowMixin:
                 if kind != "permanent":
                     break
                 continue
+            self._mark_completion_outcome(entry, "confirmed")
             queue.remove(entry)
             self.logger.log(
                 "record_update_synchronized",
@@ -536,6 +548,7 @@ class WorkflowMixin:
         }
         if status_record_id is not None:
             entry["status_record_id"] = status_record_id
+            entry["record_status_outcome"] = "pending"
         queue = self.state.setdefault("pending_messages", [])
         queue.append(entry)
         self._trim_queue(queue, MAX_QUEUED_MESSAGES, "lifecycle_chat_dropped")
@@ -557,7 +570,7 @@ class WorkflowMixin:
                 entries.append(entry)
         return entries
 
-    def completion_status_line(self, record_id):
+    def completion_status_line(self, record_id, outcome=None):
         """Describe external completion state as it is when the message is sent."""
         parts = []
         if self._supports("supports_response_record_status"):
@@ -568,11 +581,14 @@ class WorkflowMixin:
             slot = self.state.get("pending_response_status")
             if isinstance(slot, dict) and slot.get("record_id") == record_id:
                 queued = True
-            parts.append(
-                "Response record: DONE update queued"
-                if queued
-                else "Response record: DONE"
-            )
+            if queued:
+                parts.append("Response record: DONE update queued")
+            elif outcome == "confirmed":
+                parts.append("Response record: DONE")
+            else:
+                # Absence from the queue can mean expiry, rejection or eviction;
+                # it is not evidence that the external system accepted DONE.
+                parts.append("Response record: DONE not confirmed — check external system")
         if self.asset_tracking_enabled():
             if self.state.get("asset_status_sync_pending"):
                 parts.append(
@@ -591,7 +607,9 @@ class WorkflowMixin:
         record_id = entry.get("status_record_id")
         if record_id is None:
             return content
-        status_line = self.completion_status_line(record_id)
+        status_line = self.completion_status_line(
+            record_id, entry.get("record_status_outcome")
+        )
         return f"{content}\n{status_line}" if status_line else content
 
     def flush_messages(self, force=False):
@@ -708,6 +726,10 @@ class WorkflowMixin:
                 error=str(exc),
             )
             return False
+        self._mark_completion_outcome(
+            {"action": "status", "status": status, "record_id": response_record_id},
+            "confirmed",
+        )
         self.state["pending_response_status"] = None
         self.save_state()
         return True
@@ -1144,7 +1166,7 @@ class WorkflowMixin:
         self.flush_messages(force=force)
         remaining = self.queued_sync_count()
         if not remaining:
-            return "All queued updates synchronized"
+            return "No external updates remain queued • check activity for delivery details"
         return (
             f"{remaining} external update{'s' if remaining != 1 else ''} still queued"
             " • retrying automatically"
@@ -1261,9 +1283,6 @@ class WorkflowMixin:
                 if planned
                 else "Confirm the repair is complete, guards are in place, and the line is safe to operate."
             ),
-            # The operator's touch is the moment Production was released; the
-            # worker that records it may run later.
-            "requested_at": time.time(),
         }
         earlier = self.state.get("completion_confirmed_at")
         if isinstance(earlier, (int, float)) and not isinstance(earlier, bool):

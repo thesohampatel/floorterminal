@@ -24,7 +24,8 @@ configuration or connector changes, and an idle state file stays readable by
   is recorded first. If the release itself cannot be saved, a later confirmation
   (including after a restart) records the original release time. The
   micro-stop/downtime classification therefore does not change, and the dialog
-  says which time will be recorded.
+  says which time will be recorded. The timestamp is captured on the affirmative
+  confirmation touch, not when the dialog opens or a background worker starts.
 - **Line release is one atomic transition.** The release, the queued
   response-record comment and DONE status, the asset Online state, and the
   completion notifications are committed in a single save before any network
@@ -36,7 +37,11 @@ configuration or connector changes, and an idle state file stays readable by
 - **Truthful completion messages.** The status line in completion chats is built
   when the message is actually sent. It says "DONE update queued" or "ONLINE
   update queued" until those updates have really succeeded, instead of always
-  claiming "DONE • ONLINE".
+  claiming "DONE • ONLINE". If the DONE update expires or is abandoned, chats say
+  "DONE not confirmed" rather than treating an empty queue as delivery evidence.
+  Successful delivery evidence survives a restart while notifications are queued.
+  Manual synchronization reports queue state without claiming discarded updates
+  were delivered.
 - **A queued DONE is not lost to the next incident.** Completion status updates
   have their own queue and are no longer overwritten when the next repair starts.
 - **Specific, persistent error messages.** A failed touch action or operator

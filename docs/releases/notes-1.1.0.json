@@ -14,7 +14,8 @@
     "A save that cannot be completed restores the last saved state instead of poisoning later actions",
     "A retried release keeps the first confirmed release time, so durations do not grow",
     "Response-record completion, comments, asset status and messages are no longer skipped",
-    "Completion messages state what was actually synchronized",
+    "Completion messages preserve delivery evidence and never treat abandoned updates as DONE",
+    "Release timing starts at the affirmative confirmation touch, not when its dialog opens",
     "Team and chat names can be typed in Settings even when a directory is loaded",
     "Save and Cancel stay visible in Settings on 800 x 480 panels",
     "Every documented message-template placeholder formats without error"

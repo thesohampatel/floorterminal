@@ -159,6 +159,8 @@ def _validate_work_fields(data):
         status_record = message.get("status_record_id")
         if status_record is not None and not _record_id(status_record):
             raise StateIntegrityError("Persisted message status_record_id is invalid")
+        if message.get("record_status_outcome") not in {None, "pending", "confirmed", "failed"}:
+            raise StateIntegrityError("Persisted message completion outcome is invalid")
         if message.get("kind", "lifecycle") not in {"lifecycle", "support"}:
             raise StateIntegrityError("Persisted message kind is invalid")
 

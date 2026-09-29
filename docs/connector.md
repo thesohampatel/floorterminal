@@ -157,6 +157,14 @@ idempotency guarantee below. Application-level delayed synchronization persists
 the same logical intent across restarts; transport retry is only a short,
 connector-declared optimization.
 
+Durable comment and chat delivery is **at least once**, not an exactly-once guarantee:
+if the external system accepts a message but its response is lost, a later retry can
+repeat it. A deployment requiring duplicate-free append operations must provide an
+idempotent integration/gateway. This does not weaken the separate mandatory stable-key
+guarantee for response-record creation and asset-status events. Completion messages
+keep explicit successful-DONE evidence; an expired or abandoned update is never
+represented as a confirmed close.
+
 The body definition supports `json`, `form`, or `none`, a static envelope, and a dotted `payload_path`:
 
 ```json

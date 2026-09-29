@@ -352,12 +352,23 @@ class CompletionSynchronizationTests(WorkflowHarness):
         healthy = FakeConnector()
         app = self.app(healthy)
         summary = app.synchronize_due_work(force=True)
-        self.assertEqual(summary, "All queued updates synchronized")
+        self.assertEqual(summary, "No external updates remain queued • check activity for delivery details")
         self.assertIn((record, "DONE"), healthy.calls_to("status"))
         self.assertEqual(healthy.calls_to("asset")[0][0], "ONLINE")
         released = [args[1] for args in healthy.calls_to("message")]
         self.assertTrue(all("Response record: DONE • Asset: ONLINE" in text for text in released))
         self.assertFalse(app.has_queued_sync())
+
+    def test_empty_queue_after_expiry_does_not_claim_delivery(self):
+        app = self.app()
+        app.queue_message("Engineering", "Help needed", kind="support")
+        for entry in app.state["pending_messages"]:
+            entry["expires_at"] = time.time() - 1
+        app.save_state()
+        summary = app.synchronize_due_work(force=True)
+        self.assertFalse(app.has_queued_sync())
+        self.assertNotIn("synchronized", summary)
+        self.assertIn("check activity", summary)
 
     def test_completion_message_does_not_claim_an_unsynchronized_close(self):
         app = self.app()
@@ -500,6 +511,77 @@ class FailureClassificationTests(unittest.TestCase):
         self.assertEqual(kind(TimeoutError("read timed out")), "transient")
         self.assertEqual(kind(RuntimeError("No configured conversation")), "permanent")
 
+
+
+class CompletionEvidenceTests(WorkflowHarness):
+    def pending_completion(self, status_error):
+        app = self.app()
+        self.start_repair(app)
+        if status_error:
+            self.provider.fail("status", status_error)
+        self.provider.fail("message", rate_limited())
+        app.finish_work()
+        return app
+
+    def assert_unconfirmed_after_restart(self):
+        healthy = FakeConnector()
+        restored = self.app(healthy)
+        restored.flush_messages(force=True)
+        messages = healthy.calls_to("message")
+        self.assertTrue(messages)
+        self.assertTrue(all("DONE not confirmed" in text for _chat, text in messages))
+        self.assertFalse(any("Response record: DONE •" in text for _chat, text in messages))
+
+    def test_abandoned_done_is_not_reported_as_success(self):
+        app = self.pending_completion(IntegrationError("Forbidden", "PERMISSION", 403))
+        for _attempt in range(workflow_module.PERMANENT_FAILURE_ATTEMPTS):
+            app.flush_record_updates(force=True)
+        self.assertFalse(app.state["pending_record_updates"])
+        self.assertTrue(app.logger.named("record_update_abandoned"))
+        self.assert_unconfirmed_after_restart()
+
+    def test_expired_done_is_not_reported_as_success(self):
+        app = self.pending_completion(unavailable())
+        for entry in app.state["pending_record_updates"]:
+            entry["expires_at"] = time.time() - 1
+        app.save_state()
+        app.flush_record_updates(force=True)
+        self.assertTrue(app.logger.named("record_update_expired"))
+        self.assert_unconfirmed_after_restart()
+
+    def test_evicted_done_is_not_reported_as_success(self):
+        app = self.pending_completion(unavailable())
+        app._trim_queue(app.state["pending_record_updates"], 0, "record_update_dropped")
+        app.save_state()
+        self.assert_unconfirmed_after_restart()
+
+    def test_confirmed_done_evidence_survives_delayed_message_and_restart(self):
+        app = self.pending_completion(None)
+        self.assertFalse(app.state["pending_record_updates"])
+        self.assertTrue(all(
+            entry["record_status_outcome"] == "confirmed"
+            for entry in StateStore(self.path).data["pending_messages"]
+        ))
+        healthy = FakeConnector()
+        self.app(healthy).flush_messages(force=True)
+        self.assertTrue(all(
+            "Response record: DONE • Asset: ONLINE" in text
+            for _chat, text in healthy.calls_to("message")
+        ))
+
+    def test_legacy_message_without_delivery_evidence_is_not_assumed_done(self):
+        app = self.app()
+        entry = app.queue_message("Engineering", "Production released", status_record_id="old-record")
+        entry.pop("record_status_outcome")
+        app.save_state()
+        self.assert_unconfirmed_after_restart()
+
+    def test_invalid_completion_evidence_cannot_be_saved(self):
+        app = self.app()
+        entry = app.queue_message("Engineering", "Production released", status_record_id="record")
+        entry["record_status_outcome"] = "untrusted"
+        with self.assertRaises(StateSaveError):
+            app.save_state()
 
 if __name__ == "__main__":
     unittest.main()
