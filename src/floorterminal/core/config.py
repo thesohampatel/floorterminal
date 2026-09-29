@@ -274,6 +274,38 @@ def validate_station_failures(config):
         )
 
 
+#: Settings holding a team, chat, or person name in the connected directory.
+DIRECTORY_NAME_SETTINGS = (
+    "engineering_team_name",
+    "engineering_chat_name",
+    "quality_chat_name",
+    "production_chat_name",
+    "common_activity_chat_name",
+    "escalation_chat_name",
+)
+MAX_DIRECTORY_NAME_LENGTH = 120
+
+
+def validate_directory_names(config):
+    """Names are free text, but must be one printable line of bounded length.
+
+    Applied when Settings saves. It is deliberately not part of startup
+    validation, so an installation upgraded with an unusual hand-edited name
+    still starts and can correct it in Settings.
+    """
+    for key in DIRECTORY_NAME_SETTINGS:
+        value = config.get(key, "")
+        label = key.replace("_", " ")
+        if not isinstance(value, str):
+            raise ConfigurationError(f"{label} must be text.")
+        if len(value) > MAX_DIRECTORY_NAME_LENGTH:
+            raise ConfigurationError(
+                f"{label} must be at most {MAX_DIRECTORY_NAME_LENGTH} characters."
+            )
+        if any(not character.isprintable() for character in value):
+            raise ConfigurationError(f"{label} must be a single line of text.")
+
+
 def validate_config(config):
     """Validate every operator-editable production setting."""
     validate_station_failures(config)

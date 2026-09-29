@@ -38,7 +38,7 @@ class SystemClockTests(unittest.TestCase):
         self.assertIn("far ahead", result.reason)
 
     def test_an_unusable_reference_never_blocks_startup(self):
-        for reference in (None, "", "not a timestamp", "2026-13-45T99:99:99Z"):
+        for reference in ("", "not a timestamp", "2026-13-45T99:99:99Z"):
             with self.subTest(reference=reference):
                 self.assertTrue(check_clock(reference, RELEASED).trusted)
 

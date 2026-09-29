@@ -158,5 +158,8 @@
   "settings_initial_password_active": "The initial build password is active. The standard release password is public: change it before production use.",
   "settings_password_saved": "Password saved immediately. Other Settings edits are still unsaved.",
   "yes_confirm": "YES, CONFIRM",
-  "yes_line_down": "YES, LINE IS DOWN"
+  "yes_line_down": "YES, LINE IS DOWN",
+  "settings_team_and_chat_names": "Team and chat names",
+  "settings_team_and_chat_names_directory": "Type any name or pick one found in the connected directory. Names match without regard to capital letters.",
+  "settings_team_and_chat_names_manual": "Type the exact team, chat, or person name used by the connected service. Names match without regard to capital letters."
 }

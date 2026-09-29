@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 from floorterminal import __version__
 from floorterminal.core.config import validate_config
 from floorterminal.integration.definition import IntegrationDefinition
-from floorterminal.update import manifest, trust
+from floorterminal.update import manifest, trust, version
 from scripts.build.build import source_input_manifest
 
 INSTALL_FILES = frozenset(
@@ -129,12 +129,10 @@ def check_source_metadata(root):
         (root / "update-channel/latest.json").read_bytes(),
         (root / "update-channel/latest.json.sig").read_bytes(),
     )
+    check_release_version(channel)
     require(
-        channel.release.version == __version__,
-        "Signed channel/application version mismatch",
-    )
-    require(
-        channel.release.notes_url == f"{trust.RELEASES_URL}/tag/v{__version__}",
+        channel.release.notes_url
+        == f"{trust.RELEASES_URL}/tag/v{channel.release.version}",
         "Signed release notes do not point to the canonical release",
     )
     keys = json.loads(
@@ -153,6 +151,26 @@ def check_source_metadata(root):
         "Public signing descriptor does not match the pinned key",
     )
     return channel
+
+
+def check_release_version(channel, source_version=None, *, exact=False):
+    """The signed channel announces the newest published release.
+
+    Between releases the source may already carry the next version while the
+    channel still announces the last published one; it can never be ahead of
+    the source. Auditing release artifacts requires an exact match, because the
+    channel must then describe exactly the build being published.
+    """
+    source = version.parse(source_version or __version__)
+    announced = version.parse(channel.release.version)
+    if exact:
+        require(announced == source, "Signed channel/application version mismatch")
+    else:
+        require(
+            announced <= source,
+            "Signed channel announces a version newer than this source",
+        )
+    return announced == source
 
 
 def check_actions(root):
@@ -257,6 +275,7 @@ def audit_archive(path, prefix, expected):
 
 
 def check_artifacts(folder, channel, root=ROOT):
+    check_release_version(channel, exact=True)
     folder = Path(folder)
     stem = f"floorterminal-v{__version__}"
     installation = folder / f"{stem}-linux-arm64.tar.gz"
@@ -377,6 +396,12 @@ def main():
         "Publication audit passed: reviewed file set, version, examples, pinned actions, signed channel"
         + (" and source-matched ARM64 archives" if args.artifacts else "")
     )
+    if channel.release.version != __version__:
+        print(
+            f"Source version {__version__} is not yet announced: the signed channel "
+            f"still announces {channel.release.version}. Build, sign and publish "
+            f"{__version__} together with its channel update."
+        )
     print(
         "Offline only. Run the test suite and secret/history scanner separately; "
         "hosted CI and deployment commissioning remain owner checks."

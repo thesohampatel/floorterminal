@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "floorterminal"
-version = "1.0.0"
+version = "1.1.0"
 description = "Provider-neutral line-side reporting and first-response touchscreen console"
 readme = "README.md"
 license = {file = "LICENSE"}

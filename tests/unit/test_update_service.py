@@ -56,6 +56,9 @@ class UpdateServiceTests(unittest.TestCase):
         service = UpdateService(
             settings, self.logger, self.layout, media_roots=[str(self.media_root)]
         )
+        # These scenarios describe a terminal running the 1.0.0 slot that
+        # build_installation creates, independent of the version under test.
+        service.installed_version = "1.0.0"
         service.prepare()
         return service
 

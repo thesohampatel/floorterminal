@@ -3,16 +3,46 @@
 from __future__ import annotations
 
 import json
+import threading
+from copy import deepcopy
 from numbers import Real
 
 from ..core.config import STATE_FILE, restrict_file, write_json
 
 STATE_SCHEMA_VERSION = 1
 VALID_STATUSES = {"RUNNING", "DOWN", "REPAIRING", "ENGINEERING"}
+#: Bounded durable queues. A terminal that has been offline for a long time must
+#: not grow its state file without limit or replay an unbounded backlog.
+MAX_QUEUED_RECORD_UPDATES = 100
+MAX_QUEUED_MESSAGES = 50
+MAX_WORK_LABEL_LENGTH = 120
+MAX_QUEUED_TEXT_LENGTH = 8000
+RECORD_UPDATE_ACTIONS = {"status", "comment"}
+RESPONSE_STATUSES = {"IN_PROGRESS", "DONE"}
 
 
 class StateIntegrityError(ValueError):
     """Raised when persisted operational state cannot be trusted."""
+
+
+class StateSaveError(RuntimeError):
+    """Raised when a change could not be persisted and was rolled back.
+
+    The in-memory state is restored to the last successfully saved snapshot
+    before this is raised, so the screen never shows a transition that the
+    state file does not contain.
+    """
+
+
+#: Fields added in 1.1.0. They are written only while they carry information, so
+#: an idle terminal's state file stays readable by 1.0.0 after a version rollback.
+SPARSE_DEFAULTS = {
+    "work_label": None,
+    "work_type": None,
+    "completion_confirmed_at": None,
+    "pending_record_updates": [],
+    "pending_messages": [],
+}
 
 
 INITIAL_STATE = {
@@ -43,11 +73,96 @@ INITIAL_STATE = {
     "pending_response_record": None,
     "pending_sync_error": "",
     "pending_planned_work": None,
+    **SPARSE_DEFAULTS,
 }
 
 
 def _optional_number(value):
     return value is None or isinstance(value, Real) and not isinstance(value, bool)
+
+
+def _record_id(value):
+    return not isinstance(value, bool) and isinstance(value, (str, int))
+
+
+def _non_negative_int(value):
+    return not isinstance(value, bool) and isinstance(value, int) and value >= 0
+
+
+def _validate_queue_entry(entry, name):
+    """Shared retry bookkeeping for the durable record-update and message queues."""
+    if not isinstance(entry, dict):
+        raise StateIntegrityError(f"Persisted {name} entries must be objects")
+    if not isinstance(entry.get("id"), str) or not entry["id"].strip():
+        raise StateIntegrityError(f"Persisted {name} entry is missing its id")
+    if not _optional_number(entry.get("created_at")) or entry.get("created_at") is None:
+        raise StateIntegrityError(f"Persisted {name} created_at must be a number")
+    if not _non_negative_int(entry.get("attempts", 0)):
+        raise StateIntegrityError(f"Persisted {name} attempts are invalid")
+    for key in ("last_attempt_at", "retry_after_seconds", "expires_at"):
+        if not _optional_number(entry.get(key)):
+            raise StateIntegrityError(f"Persisted {name} {key} must be a number or null")
+    if not isinstance(entry.get("last_error", ""), str):
+        raise StateIntegrityError(f"Persisted {name} last_error must be text")
+
+
+def _validate_work_fields(data):
+    for key in ("work_label", "work_type"):
+        value = data.get(key)
+        if value is not None and (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > MAX_WORK_LABEL_LENGTH
+        ):
+            raise StateIntegrityError(f"Persisted {key} must be short text or null")
+    if not _optional_number(data.get("completion_confirmed_at")):
+        raise StateIntegrityError(
+            "Persisted completion_confirmed_at must be a number or null"
+        )
+    updates = data.get("pending_record_updates")
+    if not isinstance(updates, list) or len(updates) > MAX_QUEUED_RECORD_UPDATES:
+        raise StateIntegrityError(
+            f"Persisted pending_record_updates must be a list of at most "
+            f"{MAX_QUEUED_RECORD_UPDATES} entries"
+        )
+    for update in updates:
+        _validate_queue_entry(update, "record update")
+        if not _record_id(update.get("record_id")):
+            raise StateIntegrityError("Persisted record update record_id is invalid")
+        action = update.get("action")
+        if action not in RECORD_UPDATE_ACTIONS:
+            raise StateIntegrityError("Persisted record update action is invalid")
+        if action == "status" and update.get("status") not in RESPONSE_STATUSES:
+            raise StateIntegrityError("Persisted record update status is invalid")
+        if action == "comment" and (
+            not isinstance(update.get("content"), str)
+            or not update["content"].strip()
+            or len(update["content"]) > MAX_QUEUED_TEXT_LENGTH
+        ):
+            raise StateIntegrityError("Persisted record update comment is invalid")
+    messages = data.get("pending_messages")
+    if not isinstance(messages, list) or len(messages) > MAX_QUEUED_MESSAGES:
+        raise StateIntegrityError(
+            f"Persisted pending_messages must be a list of at most "
+            f"{MAX_QUEUED_MESSAGES} entries"
+        )
+    for message in messages:
+        _validate_queue_entry(message, "message")
+        if not isinstance(message.get("chat"), str) or not message["chat"].strip():
+            raise StateIntegrityError("Persisted message chat name is invalid")
+        if (
+            not isinstance(message.get("content"), str)
+            or not message["content"].strip()
+            or len(message["content"]) > MAX_QUEUED_TEXT_LENGTH
+        ):
+            raise StateIntegrityError("Persisted message content is invalid")
+        status_record = message.get("status_record_id")
+        if status_record is not None and not _record_id(status_record):
+            raise StateIntegrityError("Persisted message status_record_id is invalid")
+        if message.get("record_status_outcome") not in {None, "pending", "confirmed", "failed"}:
+            raise StateIntegrityError("Persisted message completion outcome is invalid")
+        if message.get("kind", "lifecycle") not in {"lifecycle", "support"}:
+            raise StateIntegrityError("Persisted message kind is invalid")
 
 
 def validate_state(data):
@@ -277,12 +392,28 @@ def validate_state(data):
             value = planned.get(key)
             if value is not None and not isinstance(value, str):
                 raise StateIntegrityError(f"Pending planned work {key} must be text")
+    _validate_work_fields(data)
     return data
+
+
+def persisted_view(data):
+    """Return the document written to disk, omitting idle 1.1.0 fields.
+
+    Omitting a sparse field that still holds its default keeps an idle state file
+    byte-compatible with 1.0.0, whose validator rejects unknown fields. A version
+    rollback therefore resumes cleanly instead of stopping for state recovery.
+    """
+    return {
+        key: value
+        for key, value in data.items()
+        if not (key in SPARSE_DEFAULTS and value == SPARSE_DEFAULTS[key])
+    }
 
 
 class StateStore:
     def __init__(self, path=STATE_FILE):
         self.path = path
+        self._lock = threading.RLock()
         if path.exists():
             restrict_file(path)
         try:
@@ -302,7 +433,9 @@ class StateStore:
             raise StateIntegrityError(
                 f"Unsupported downtime state schema_version: {schema!r}"
             )
-        self.data = {**INITIAL_STATE, **saved}
+        # Deep copies keep the module-level template immutable: a shallow merge
+        # would share its lists, so appending an event would change the default.
+        self.data = {**deepcopy(INITIAL_STATE), **saved}
         self.data["schema_version"] = STATE_SCHEMA_VERSION
         self.data.setdefault("events", [])
         self.data.setdefault("engineer_ids", [])
@@ -330,8 +463,55 @@ class StateStore:
             )
         if not isinstance(self.data["failure_selections"], dict):
             self.data["failure_selections"] = {}
+        for key, default in SPARSE_DEFAULTS.items():
+            if self.data.get(key) is None and default is not None:
+                self.data[key] = deepcopy(default)
         validate_state(self.data)
+        self._committed = deepcopy(self.data)
+
+    @property
+    def committed(self):
+        """A copy of the last state known to be on disk."""
+        with self._lock:
+            return deepcopy(self._committed)
 
     def save(self):
-        validate_state(self.data)
-        write_json(self.path, self.data)
+        """Validate and atomically persist, or roll memory back and raise.
+
+        Validation runs on an isolated snapshot before anything is written. When
+        validation or the write fails, the live dictionary is restored in place
+        to the last committed snapshot, so callers holding ``self.data`` keep a
+        view that matches the file and one bad value cannot poison later saves.
+        """
+        with self._lock:
+            try:
+                snapshot = self._snapshot()
+                validate_state(snapshot)
+                write_json(self.path, persisted_view(snapshot))
+            except (StateIntegrityError, OSError, TypeError, ValueError) as exc:
+                self.rollback()
+                raise StateSaveError(
+                    f"Line state could not be saved ({exc}); the last saved state "
+                    "was restored"
+                ) from exc
+            self._committed = snapshot
+
+    def _snapshot(self):
+        """Copy the live state, tolerating a concurrent change on the UI thread.
+
+        Operations run on a worker thread while touch handlers may update a
+        selection; a copy taken during such an update is simply retried.
+        """
+        for _attempt in range(5):
+            try:
+                return deepcopy(self.data)
+            except RuntimeError:
+                continue
+        return deepcopy(dict(self.data))
+
+    def rollback(self):
+        """Restore the live dictionary, in place, to the last committed state."""
+        with self._lock:
+            restored = deepcopy(self._committed)
+            self.data.clear()
+            self.data.update(restored)

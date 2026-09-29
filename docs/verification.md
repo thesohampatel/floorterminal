@@ -1,4 +1,34 @@
-# Release verification — 1.0.0
+# Release verification
+
+## 1.1.0 — release verification
+
+Verified on 29 September 2026 on Raspberry Pi 5, Raspberry Pi OS 64-bit
+(Debian 13/Trixie), Python 3.13.5 and Tk 8.6. The graphical checks use private X11
+displays at 96 DPI, without disturbing an existing kiosk. Connector transports are
+offline test doubles; the compiled acceptance runs use a disabled, credential-free
+connector and process-level network guards.
+
+| Check | Result and boundary |
+|---|---|
+| Native offline suite | 410 tests pass on ARM64, zero skips; 53 additional regressions compared with 1.0.0 |
+| Coverage | 83% overall measured source coverage, including the touchscreen subprocess; the CI minimum is 70% |
+| Real state store | Completion, planned work, interrupted saves, queue recovery, and restarts use real state files |
+| Completion evidence | Expired, rejected or evicted DONE updates never become a successful completion claim; positive evidence survives delayed notifications and restart |
+| Confirmation timing | Duration ends at the affirmative confirmation touch, not the dialog opening or delayed background-worker start |
+| Touchscreen sweep | Workflow states/dialogs and touch targets checked at 800×480, 1280×800, 1600×960 and 1920×1080; six Settings tabs and editable directory names covered |
+| Compiled application | Native executable launched and clicked on private 800×480 and 1600×960 displays: main screen, Information, administrator identity/password, and Settings; Save/Cancel visible on the 7-inch layout |
+| Signed upgrade and rollback | Actual 1.0.0 → 1.1.0 binary activation, automatic confirmation after the 120-second healthy-start dwell, same-version refusal, and idle rollback to 1.0.0; configuration, connector and saved state remain byte-for-byte unchanged |
+| Native packaging | PyInstaller 6.21.0; exact 14-file source-free ARM64 bundle with disabled connector, MIT license, dependency notices, SBOM and checksums |
+| Traceability | Final compiled-input fingerprint matches the private build source manifest; signed channel binds the executable and installation archive digests |
+| Static checks | Ruff 0.16.9; Python compilation, shell syntax and publication gate |
+| Documentation images | 22 application-generated images/animations updated for 1.1.0; no customer data or real connector responses |
+
+Automated testing does not certify every site integration, display, audio device,
+or operating-system image. The first-install bundle targets the OS generation
+above; older OS images may require a native source build. See the site acceptance
+requirements below.
+
+## 1.0.0
 
 This records the scope and results of local version 1.0.0 verification. It is not
 certification or a claim that every site integration has been tested. Tests use

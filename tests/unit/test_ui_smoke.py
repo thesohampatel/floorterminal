@@ -65,8 +65,9 @@ class TouchscreenSmokeTests(unittest.TestCase):
         self.assertEqual(faults, [], f"{len(faults)} UI faults:\n{detail}")
 
     def test_the_sweep_covered_the_expected_breadth(self):
-        # Four workflow states across thirteen dialogs, and every touch target in
-        # each. A sharp drop means a dialog stopped registering its controls.
+        # Four workflow states across every dialog (including the completion
+        # note and the error panel), and every touch target in each. A sharp drop
+        # means a dialog stopped registering its controls.
         self.assertGreaterEqual(self.result.get("rendered", 0), 52)
         self.assertGreaterEqual(self.result.get("pressed", 0), 900)
 
@@ -99,6 +100,17 @@ class TouchscreenSmokeTests(unittest.TestCase):
 
     def test_password_change_masks_input_and_returns_to_settings(self):
         self.assertTrue(self.result.get("access_change_verified"))
+
+    def test_team_and_chat_names_are_editable_with_a_loaded_directory(self):
+        """Regression: directory-backed names were read-only once one was set."""
+        self.assertTrue(self.result.get("settings_directory_names_editable"))
+
+    def test_settings_actions_stay_on_screen_on_a_7_inch_panel(self):
+        """Regression: at 800x480 the tabs pushed Save and Cancel off the window."""
+        self.assertTrue(self.result.get("settings_actions_visible_on_7_inch"))
+
+    def test_background_operations_were_dispatched_by_their_controls(self):
+        self.assertGreater(self.result.get("dispatched_operations", 0), 0)
 
 
 if __name__ == "__main__":

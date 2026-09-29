@@ -23,8 +23,9 @@ escalation procedures.
 
 ![Neutral offline operator console](docs/images/operator-console.png)
 
-Screenshots are native-resolution captures of the real Tk application running on
-a Raspberry Pi, not enlarged thumbnails or mockups. Click an image for its original
+Screenshots are native-resolution captures of the real Tk application on a Linux
+X11 display, rendered by the documented capture script — not enlarged thumbnails or
+mockups. Click an image for its original
 pixels. The examples use a **disabled, credential-free connector**: unavailable
 support buttons and **Setup needed** are expected until a site is configured.
 The update panels illustrate documented states; they do not claim that an example
@@ -61,7 +62,7 @@ notices, SBOM, deployment instructions, and checksums.
 Look for an asset named like:
 
 ```text
-floorterminal-v1.0.0-linux-arm64.tar.gz
+floorterminal-v1.1.0-linux-arm64.tar.gz
 ```
 
 This is an application bundle—not a Raspberry Pi OS disk image. Install Raspberry Pi
@@ -69,9 +70,9 @@ OS 64-bit with a graphical session first; then download and extract the bundle o
 Pi. The short installation path is:
 
 ```bash
-sha256sum -c floorterminal-v1.0.0-linux-arm64.tar.gz.sha256
-tar -xzf floorterminal-v1.0.0-linux-arm64.tar.gz
-cd floorterminal-v1.0.0-linux-arm64
+sha256sum -c floorterminal-v1.1.0-linux-arm64.tar.gz.sha256
+tar -xzf floorterminal-v1.1.0-linux-arm64.tar.gz
+cd floorterminal-v1.1.0-linux-arm64
 sha256sum -c SHA256SUMS
 chmod +x install.sh floorterminal-launch floorterminal
 ./install.sh
@@ -94,7 +95,8 @@ troubleshooting. Later versions install offline from a signed USB drive; see the
 [update guide](docs/update-user-guide.md). Users who do not trust or cannot use the prebuilt artifact can follow
 [Native release builds](docs/building.md) to reproduce it from source on their Pi.
 Compatibility and verification results are documented in
-[Version 1.0.0 release notes](docs/releases/v1.0.0.md).
+[Version 1.1.0 release notes](docs/releases/v1.1.0.md) and
+[version 1.0.0 release notes](docs/releases/v1.0.0.md).
 
 ## Software updates
 
@@ -172,6 +174,10 @@ posts completion, and returns the asset to available status where supported.
 discipline with distinct planned-event text. Support buttons only send contextual
 messages; they do not create response records. A configurable unanswered-event escalation
 is sent once. A persistent badge exposes queued synchronization and manual retry.
+Record updates and chat notifications that cannot be delivered — during an outage or
+while the connector's request budget is spent — are queued in the saved state and
+retried automatically, including after a restart. A failed action is explained in a
+message that names the operation and stays until acknowledged.
 
 Read the complete [operator guide](docs/operator-guide.md).
 
@@ -404,6 +410,7 @@ docs/                                operations, API, assurance, and user docs
 - [Operator guide](docs/operator-guide.md)
 - [Prebuilt Raspberry Pi installation](docs/prebuilt-raspberry-pi.md)
 - [Update guide](docs/update-user-guide.md) and [offline software updates](docs/software-updates.md)
+- [Version 1.1.0 release notes](docs/releases/v1.1.0.md)
 - [Version 1.0.0 release notes](docs/releases/v1.0.0.md)
 - [Configuration](docs/configuration.md) and [Connector v1](docs/connector.md)
 - [Sound](docs/sound.md), [Accessibility evidence](docs/accessibility.md), [Architecture](docs/architecture.md), and [Operations](docs/operations.md)

@@ -157,6 +157,14 @@ idempotency guarantee below. Application-level delayed synchronization persists
 the same logical intent across restarts; transport retry is only a short,
 connector-declared optimization.
 
+Durable comment and chat delivery is **at least once**, not an exactly-once guarantee:
+if the external system accepts a message but its response is lost, a later retry can
+repeat it. A deployment requiring duplicate-free append operations must provide an
+idempotent integration/gateway. This does not weaken the separate mandatory stable-key
+guarantee for response-record creation and asset-status events. Completion messages
+keep explicit successful-DONE evidence; an expired or abandoned update is never
+represented as a confirmed close.
+
 The body definition supports `json`, `form`, or `none`, a static envelope, and a dotted `payload_path`:
 
 ```json
@@ -213,7 +221,9 @@ An enabled capability must map all required semantic operations. Disabled capabi
 
 `workflow.fields` translates canonical names such as title, description, priority,
 type, assignees, identifiers, status, asset, location, names, cursor, and message
-content. `workflow.values` translates canonical lifecycle values into strings or
+content. `status_description` names the free-text note of an asset status change;
+the terminal fills it with the affected stations, reported failure types, operator
+note, and response-record reference, without wall-clock timestamps. `workflow.values` translates canonical lifecycle values into strings or
 numeric codes expected externally. `workflow.collections` locates arrays such as
 `items`, `data.records`, or `value`. `workflow.objects` locates nested created and
 identity objects.
