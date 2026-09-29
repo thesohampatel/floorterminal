@@ -17,6 +17,7 @@ connector and process-level network guards.
 | Confirmation timing | Duration ends at the affirmative confirmation touch, not the dialog opening or delayed background-worker start |
 | Touchscreen sweep | Workflow states/dialogs and touch targets checked at 800×480, 1280×800, 1600×960 and 1920×1080; six Settings tabs and editable directory names covered |
 | Compiled application | Native executable launched and clicked on private 800×480 and 1600×960 displays: main screen, Information, administrator identity/password, and Settings; Save/Cancel visible on the 7-inch layout |
+| Signed upgrade and rollback | Actual 1.0.0 → 1.1.0 binary activation, automatic confirmation after the 120-second healthy-start dwell, same-version refusal, and idle rollback to 1.0.0; configuration, connector and saved state remain byte-for-byte unchanged |
 | Native packaging | PyInstaller 6.21.0; exact 14-file source-free ARM64 bundle with disabled connector, MIT license, dependency notices, SBOM and checksums |
 | Traceability | Final compiled-input fingerprint matches the private build source manifest; signed channel binds the executable and installation archive digests |
 | Static checks | Ruff 0.16.9; Python compilation, shell syntax and publication gate |
