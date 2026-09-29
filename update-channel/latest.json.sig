@@ -2,5 +2,5 @@
   "algorithm": "ed25519",
   "key_id": "ba1b79d27fddd67a",
   "schema_version": 1,
-  "signature": "0atDqanKCix/+pj8uKdPsUmr1Qh/YirZTUQNGnlsB3JnR3utlGGqfMKk28Pj2blq8TCU6bipxdwHJX7ZorrOCg=="
+  "signature": "ZqATiZtapH9RrgBpD89hF/5SMl2QllY97fPdHdBjAXgPZs+atMMt77XX72849Y702FD9j0NPV4b8vh2xDzchBg=="
 }

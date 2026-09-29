@@ -1,46 +1,46 @@
 {
   "archive": {
-    "name": "floorterminal-v1.0.0-linux-arm64.tar.gz",
-    "sha256": "1ddb3613fc0a9aa83f8596a74a6fbdd649e142d620346165ded6d21255414339"
+    "name": "floorterminal-v1.1.0-linux-arm64.tar.gz",
+    "sha256": "e515a9265062f7e3217f8c20a852b42a218c595f262693ebe008cd4ea21ddfae"
   },
   "document_type": "update_channel",
   "product_id": "floorterminal",
-  "published_utc": "2026-09-09T02:50:56Z",
+  "published_utc": "2026-09-29T21:57:58Z",
   "release": {
     "artifact": {
       "name": "floorterminal",
-      "sha256": "fcb53cc376261d5fdb5011b09451da9edfdf28a3f2e69f2713f1b8e914265cc9",
-      "size_bytes": 13921288
+      "sha256": "5681cc06e640f7e4343a200241522c600d3d6339da7449ce476cab439fe4da33",
+      "size_bytes": 13963808
     },
     "features": [
-      "Station-specific failure selection and local-first incident reporting",
-      "Response coordination, repair timing and capability-based connectors",
-      "Responsive kiosk screens, meaningful animation and optional original sounds",
-      "Signed offline updates, protected Settings and structured operational logs",
-      "Public initial Settings access with installation-local password changes"
+      "Asset Offline and Online notes list the affected stations, reported failure types and the operator's note",
+      "Queued response-record updates and chat notifications survive rate limits, outages and restarts",
+      "A persistent error panel names the failed operation and the saved line status",
+      "Anti-aliased rounded shapes and DPI-independent text on Raspberry Pi displays",
+      "Cleaner, touch-sized Settings with drag scrolling and wrapped descriptions"
     ],
     "fixes": [
-      "Update availability and release links use the canonical public repository",
-      "Clearer station badges, timer spacing and modal backgrounds",
-      "Native-resolution screenshots and independently checked touchscreen layouts",
-      "Managed direct launches retain the correct deployment data root",
-      "Robust connector error handling for JSON arrays and scalar responses",
-      "Select the newest compatible signed USB release across multiple drives or version folders"
+      "Completing a repair or planned work no longer fails to save and leaves the terminal inconsistent",
+      "A save that cannot be completed restores the last saved state instead of poisoning later actions",
+      "A retried release keeps the first confirmed release time, so durations do not grow",
+      "Response-record completion, comments, asset status and messages are no longer skipped",
+      "Completion messages preserve delivery evidence and never treat abandoned updates as DONE",
+      "Release timing starts at the affirmative confirmation touch, not when its dialog opens",
+      "Team and chat names can be typed in Settings even when a directory is loaded",
+      "Save and Cancel stay visible in Settings on 800 x 480 panels",
+      "Every documented message-template placeholder formats without error"
     ],
     "minimum_upgradable_version": "1.0.0",
-    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.0.0",
-    "release_summary": "First open-source release of the line-side reporting and first-response touchscreen console.",
-    "release_title": "FloorTerminal 1.0.0",
-    "released_utc": "2026-09-09T02:50:56Z",
+    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.1.0",
+    "release_summary": "Reliability release: repair and planned-work completion is saved atomically, every follow-up update and notification is queued and retried, failures are explained precisely, team and chat names are editable, and the touchscreen renders with anti-aliased edges.",
+    "release_title": "FloorTerminal 1.1.0",
+    "released_utc": "2026-09-29T21:57:57Z",
     "security": [
-      "Credential-free distribution with strict connector validation",
-      "Verified update signatures, artifact digests and build-input fingerprints",
-      "Changed local passwords replace initial access across every protected control",
-      "Retained signed update evidence is revalidated before activation",
-      "Offline transport guards, redacted errors and source-matched publication auditing",
-      "Bind approval to version and payload; reauthenticate cached metadata and exclude failed rollback targets"
+      "State changes are validated on an isolated snapshot before an atomic write",
+      "Bounded durable queues with expiry and audited abandonment",
+      "Idle state files remain readable by 1.0.0 for safe rollback"
     ],
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "schema_version": 1,
   "targets": [

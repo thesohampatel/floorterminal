@@ -8,7 +8,8 @@ external-system connector.
 ## Supported deployment baseline
 
 - 64-bit Raspberry Pi OS on an AArch64 Raspberry Pi;
-- Raspberry Pi 5 is the validated production target;
+- Raspberry Pi 5 is the validated production target; version 1.1.0 was built on
+  Raspberry Pi OS based on Debian 13 (Trixie), with glibc 2.41;
 - a graphical desktop/compositor session because Tk needs a display server;
 - 7-inch, 10.1-inch, or another commissioned touch display;
 - at least 2 GB free during installation/acceptance testing;
@@ -22,8 +23,8 @@ start on an older image, update the supported OS or build from source on that ta
 ## 1. Download the release
 
 Open the repository's **Releases** area and select the required version. For version
-1.1.0, download both the Linux ARM64 archive and its separately published archive
-digest/signature when available. Do not download source-code archives when you need
+1.1.0, download both the Linux ARM64 archive and its separately published SHA-256
+checksum file. Do not download source-code archives when you need
 the ready-to-run executable.
 
 Recommended asset names:
@@ -42,7 +43,7 @@ scp floorterminal-v1.1.0-linux-arm64* pi@PI_ADDRESS:~/Downloads/
 
 ## 2. Verify before extraction
 
-If an archive digest is supplied:
+Verify the supplied archive checksum before extracting:
 
 ```bash
 cd ~/Downloads
@@ -60,7 +61,7 @@ tar -xzf floorterminal-v1.1.0-linux-arm64.tar.gz
 cd floorterminal-v1.1.0-linux-arm64
 ```
 
-The bundle's own manifest protects every delivered file:
+The bundle's checksum manifest detects changes to every delivered file:
 
 ```bash
 sha256sum -c SHA256SUMS
