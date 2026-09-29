@@ -54,6 +54,18 @@ EXCLUDED_CONTROLS = frozenset(
 )
 
 WORKFLOW_STATES = ("RUNNING", "DOWN", "REPAIRING", "ENGINEERING")
+#: Pseudo-dialog that renders the persistent operation-failure panel.
+ERROR_PANEL = "__error_panel__"
+SAMPLE_ERROR_PANEL = {
+    "title": "Line state could not be saved",
+    "operation": "Completing repair",
+    "message": (
+        "Line state could not be saved (Persisted state contains unsupported "
+        "fields: example); the last saved state was restored"
+    ),
+    "state_failure": True,
+    "time": "12:34:56",
+}
 
 
 def dialogs():
@@ -75,6 +87,14 @@ def dialogs():
             "title": "CONFIRM COMPLETION",
             "message": "Return the line to production?",
         },
+        {
+            "kind": "done",
+            "title": "Resume production?",
+            "message": "Confirm the repair is complete, guards are in place, and the line is safe to operate.",
+            "note": "An earlier release at 12:00:00 was not saved • confirming records Production restored at 12:00:00",
+            "requested_at": 0,
+        },
+        {"kind": ERROR_PANEL},
         {"kind": "planned"},
         {
             "kind": "password",
@@ -150,7 +170,7 @@ def _logical(canvas, item):
 
 
 def copy_dialog(dialog):
-    if dialog is None:
+    if dialog is None or dialog.get("kind") == ERROR_PANEL:
         return None
     copied = dict(dialog)
     if "selected" in copied:
@@ -201,6 +221,16 @@ def main():
     root.geometry("800x480+40+60")
     app = FloorTerminalApp(root, None)
     app.update_service.stop()
+    # Background operations are exercised deterministically by the workflow
+    # tests. Here they are recorded instead of run, so a worker thread cannot
+    # change the state this sweep is rendering or raise a panel mid-sweep.
+    dispatched = []
+
+    def record_operation(working, function, on_success=None, **_options):
+        dispatched.append(working)
+        return True
+
+    app.perform = record_operation
     root.report_callback_exception = lambda kind, value, tb: record(
         "tk-callback", f"{kind.__name__}: {value}"
     )
@@ -216,8 +246,12 @@ def main():
         app.state["started_at"] = time.time() - 300
         app.state["repair_at"] = time.time() - 60 if state == "REPAIRING" else None
         app.state["engineer_names"] = ["A. Engineer"] if state == "REPAIRING" else []
+        app.state["work_label"] = "Preventive Maintenance" if state == "ENGINEERING" else None
         app.busy = False
         app.modal = copy_dialog(dialog)
+        app.error_panel = (
+            dict(SAMPLE_ERROR_PANEL) if dialog and dialog.get("kind") == ERROR_PANEL else None
+        )
 
     rendered = 0
     for state, dialog in itertools.product(WORKFLOW_STATES, dialogs()):
@@ -252,14 +286,23 @@ def main():
                 box[1] + box[3]
             ) / 2 * app.canvas.scale_factor + app.canvas.offset_y
             event = type("Event", (), {"x": centre_x, "y": centre_y})()
+            expected_panel = dialog is not None and dialog.get("kind") == ERROR_PANEL
             try:
                 app.pressed = key
                 app.on_release(event)
+                # A failed touch action is reported on screen rather than raised,
+                # so an unexpected error panel is itself the fault.
+                if app.error_panel and not expected_panel:
+                    record(
+                        f"press {key} {label}",
+                        f"{app.error_panel.get('title')}: {app.error_panel.get('message')}",
+                    )
                 app.render()
                 pressed += 1
             except Exception:
                 record(f"press {key} {label}", traceback.format_exc(limit=3))
             app.modal = restore
+            app.error_panel = dict(SAMPLE_ERROR_PANEL) if expected_panel else None
             app.busy = False
 
     for kind in ("password", "text_input"):
@@ -376,6 +419,85 @@ def main():
         settings_tabs_checked = 0
         record("settings save", traceback.format_exc(limit=4))
 
+    def descendants(widget):
+        for child in widget.winfo_children():
+            yield child
+            yield from descendants(child)
+
+    def settle(count=8):
+        for _ in range(count):
+            root.update()
+
+    # Team and chat names come from an external directory but must stay
+    # editable: 1.0.0 made them read-only once a value or directory existed.
+    directory_names_editable = False
+    try:
+        from tkinter import ttk
+
+        app.modal = None
+        app.config["engineering_chat_name"] = "Existing Chat"
+        settings = app.open_settings(
+            {"teams": ["Maintenance"], "conversations": ["Existing Chat", "Engineering Chat"]}
+        )
+        settle()
+        states = {}
+        for key in ("engineering_team_name", "engineering_chat_name", "quality_chat_name"):
+            variable = str(settings.vars[key])
+            for widget in descendants(settings.win):
+                if isinstance(widget, ttk.Combobox) and str(widget.cget("textvariable")) == variable:
+                    states[key] = str(widget.cget("state"))
+        settings.vars["engineering_chat_name"].set("  Brand   New Chat ")
+        settings.vars["quality_chat_name"].set("Quality Crew")
+        settings.save()
+        settle()
+        directory_names_editable = (
+            set(states.values()) == {"normal"}
+            and len(states) == 3
+            and app.config["engineering_chat_name"] == "Brand New Chat"
+            and app.config["quality_chat_name"] == "Quality Crew"
+        )
+        if not directory_names_editable:
+            record("settings directory names", f"states={states} config={app.config.get('engineering_chat_name')!r}")
+    except Exception:
+        record("settings directory names", traceback.format_exc(limit=4))
+
+    # On a 7-inch 800x480 panel Save and Cancel must stay on screen, and the
+    # station controls must not be squeezed out by the list.
+    actions_visible_on_7_inch = False
+    try:
+        app.modal = None
+        root.winfo_screenwidth = lambda: 800
+        root.winfo_screenheight = lambda: 480
+        settings = app.open_settings({"teams": [], "conversations": []})
+        settle(15)
+        window = settings.win
+        bottom = window.winfo_rooty() + window.winfo_height()
+        checked = {}
+        for index, tab_id in enumerate(settings.tabs.tabs()):
+            settings.tabs.select(tab_id)
+            settle(4)
+            for widget in descendants(window):
+                if not isinstance(widget, tk.Button):
+                    continue
+                label = widget.cget("text")
+                if label in {"SAVE", "CANCEL", "+ ADD", "MOVE DOWN"} and widget.winfo_ismapped():
+                    inside = widget.winfo_rooty() + widget.winfo_height() <= bottom + 1
+                    checked[(index, label)] = inside and widget.winfo_height() > 10
+        window.destroy()
+        expected_footer = all(
+            checked.get((index, label)) for index in range(6) for label in ("SAVE", "CANCEL")
+        )
+        actions_visible_on_7_inch = expected_footer and checked.get((2, "+ ADD")) and checked.get(
+            (2, "MOVE DOWN")
+        )
+        if not actions_visible_on_7_inch:
+            record("settings 7-inch", f"controls not fully visible: {checked}")
+    except Exception:
+        record("settings 7-inch", traceback.format_exc(limit=4))
+    finally:
+        del root.winfo_screenwidth
+        del root.winfo_screenheight
+
     # --- layout collisions at every supported panel size --------------------
     # The design is one 800x480 logical canvas scaled uniformly, but font sizes
     # are rounded per scale, so text can grow relative to its container at one
@@ -446,17 +568,22 @@ def main():
             # operator actually notices: the label is simply not there.
             covers = []
             for item in canvas.find_all():
-                if item < floor or canvas.type(item) not in {
-                    "rectangle",
-                    "polygon",
-                    "oval",
-                }:
+                if item < floor:
                     continue
-                try:
-                    if not canvas.itemcget(item, "fill"):
+                kind = canvas.type(item)
+                if kind == "image":
+                    # Anti-aliased shapes are pre-rendered images; only filled
+                    # ones hide what lies beneath them.
+                    if "ft-filled" not in canvas.gettags(item):
                         continue
-                except tk.TclError:
+                elif kind not in {"rectangle", "polygon", "oval"}:
                     continue
+                else:
+                    try:
+                        if not canvas.itemcget(item, "fill"):
+                            continue
+                    except tk.TclError:
+                        continue
                 box = _logical(canvas, item)
                 if box:
                     covers.append((item, box))
@@ -497,9 +624,12 @@ def main():
             {
                 "rendered": rendered,
                 "pressed": pressed,
+                "dispatched_operations": len(dispatched),
                 "settings_saved": settings_saved,
                 "settings_tabs_checked": settings_tabs_checked,
                 "access_change_verified": access_change_verified,
+                "settings_directory_names_editable": directory_names_editable,
+                "settings_actions_visible_on_7_inch": bool(actions_visible_on_7_inch),
                 "collisions": collisions,
                 "faults": faults,
             }

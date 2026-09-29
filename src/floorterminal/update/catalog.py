@@ -26,6 +26,29 @@ class CatalogEntry:
 
 CATALOG = (
     CatalogEntry(
+        version="1.1.0",
+        released_utc="2026-09-29T00:00:00Z",
+        title="Reliable completion and sharper touchscreen",
+        summary=(
+            "Atomic, retry-safe line release, durable notifications, specific "
+            "error messages, editable chat names, and anti-aliased rendering."
+        ),
+        features=(
+            "Touch selection of any stations or the entire line",
+            "Per-station failure lists with automatic Others note",
+            "Local-first unplanned and planned Engineering workflows",
+            "Atomic line release with durable, retried follow-ups",
+            "Notifications queued through rate limits and restarts",
+            "Asset notes with stations, reasons, and operator notes",
+            "Specific, persistent explanations of failed actions",
+            "Downtime, repair, escalation, and micro-stop timers",
+            "Editable team and chat names with directory hints",
+            "Typed Connector v1 mappings with capability isolation",
+            "Anti-aliased, DPI-independent 7-inch to desktop layouts",
+            "Signed offline USB updates with one-touch rollback",
+        ),
+    ),
+    CatalogEntry(
         version="1.0.0",
         released_utc="2026-08-31T00:00:00Z",
         title="First public open-source release",

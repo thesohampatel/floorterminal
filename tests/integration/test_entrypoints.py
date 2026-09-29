@@ -9,7 +9,7 @@ class EntrypointTests(unittest.TestCase):
 
     def test_package_version_matches_release(self):
         package = importlib.import_module("floorterminal")
-        self.assertEqual(package.__version__, "1.0.0")
+        self.assertEqual(package.__version__, "1.1.0")
 
     def test_gui_layers_import_without_creating_window(self):
         for name in (

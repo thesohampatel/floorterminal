@@ -1,4 +1,26 @@
-# Release verification — 1.0.0
+# Release verification
+
+## 1.1.0 — source verification
+
+Checks run from source on Linux x86-64 with Python 3.12, Tk 8.6 and a virtual X11
+display at 96 DPI, with the same font families as Raspberry Pi OS. Tests use
+in-memory transports and never contact an external service.
+
+| Check | Result and boundary |
+|---|---|
+| Offline suite | 401 tests pass, including 44 new regressions for completion, persistence, queues, error reporting, anti-aliased rendering, Settings, and the publication gate |
+| Coverage | 82% overall measured source coverage |
+| Real state store | Workflow tests persist every transition to a real state file and restart from it; with the 1.0.0 schema they reproduce "Persisted state contains unsupported fields" |
+| Touchscreen sweep | 72 workflow/dialog combinations including the error panel and release note, 1,700 dispatched touches, and no collision or fault at 800×480, 1280×800, 1600×960 and 1920×1080 |
+| Settings | Six tabs reachable; editable team and chat names with a loaded directory; Save, Cancel and station controls visible on an 800×480 panel |
+| Static checks | Ruff 0.16.6, Python compilation and Linux shell syntax pass; the publication gate passes with the signed channel still announcing 1.0.0 |
+| Documentation images | 22 assets regenerated with `scripts/docs/capture_images.py` |
+
+Still required before 1.1.0 is published: the native ARM64 build, the compiled-application
+checks on Raspberry Pi hardware, and the signed update channel and packages
+produced with the maintainer's key.
+
+## 1.0.0
 
 This records the scope and results of local version 1.0.0 verification. It is not
 certification or a claim that every site integration has been tested. Tests use

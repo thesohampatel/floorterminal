@@ -213,7 +213,9 @@ An enabled capability must map all required semantic operations. Disabled capabi
 
 `workflow.fields` translates canonical names such as title, description, priority,
 type, assignees, identifiers, status, asset, location, names, cursor, and message
-content. `workflow.values` translates canonical lifecycle values into strings or
+content. `status_description` names the free-text note of an asset status change;
+the terminal fills it with the affected stations, reported failure types, operator
+note, and response-record reference, without wall-clock timestamps. `workflow.values` translates canonical lifecycle values into strings or
 numeric codes expected externally. `workflow.collections` locates arrays such as
 `items`, `data.records`, or `value`. `workflow.objects` locates nested created and
 identity objects.

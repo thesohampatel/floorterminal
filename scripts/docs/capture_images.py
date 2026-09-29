@@ -89,27 +89,27 @@ def _snapshots():
     current_channel = remote.ChannelResult(
         outcome=remote.OUTCOME_OK,
         checked_at_epoch=now,
-        checked_at_utc="2026-08-31T12:00:00Z",
-        version="1.0.0",
-        released_utc="2026-08-31T00:00:00Z",
-        release_title="First public open-source release",
+        checked_at_utc="2026-09-29T12:00:00Z",
+        version="1.1.0",
+        released_utc="2026-09-29T00:00:00Z",
+        release_title="Reliable completion and sharper touchscreen",
         release_summary="The installed release is the latest published version.",
         minimum_upgradable_version="1.0.0",
-        archive_name="floorterminal-v1.0.0-linux-arm64.tar.gz",
+        archive_name="floorterminal-v1.1.0-linux-arm64.tar.gz",
         signing_key_id="ba1b79d27fddd67a",
     )
     next_channel = remote.ChannelResult(
         outcome=remote.OUTCOME_OK,
         checked_at_epoch=now,
-        checked_at_utc="2026-11-14T09:00:00Z",
-        version="1.1.0",
-        released_utc="2026-11-14T09:00:00Z",
+        checked_at_utc="2027-01-14T09:00:00Z",
+        version="1.2.0",
+        released_utc="2027-01-14T09:00:00Z",
         release_title="Reliability and accessibility update",
         release_summary=(
             "Clearer first-response guidance with update and recovery refinements."
         ),
         minimum_upgradable_version="1.0.0",
-        archive_name="floorterminal-v1.1.0-linux-arm64.tar.gz",
+        archive_name="floorterminal-v1.2.0-linux-arm64.tar.gz",
         artifact_sha256="a" * 64,
         signing_key_id="ba1b79d27fddd67a",
         features=(
@@ -123,7 +123,7 @@ def _snapshots():
         security=("Stricter offline package validation",),
     )
     staged = StagedUpdate(
-        version="1.1.0",
+        version="1.2.0",
         release_title=next_channel.release_title,
         release_summary=next_channel.release_summary,
         released_utc=next_channel.released_utc,
@@ -134,64 +134,64 @@ def _snapshots():
     )
     history = (
         {
-            "at_utc": "2026-08-31T12:05:00Z",
+            "at_utc": "2026-09-29T12:05:00Z",
             "action": "confirmed",
             "from_version": "",
-            "to_version": "1.0.0",
+            "to_version": "1.1.0",
             "outcome": "ok",
             "source": "supervisor",
         },
         {
-            "at_utc": "2026-08-31T12:00:00Z",
+            "at_utc": "2026-09-29T12:00:00Z",
             "action": "activated",
-            "from_version": "0.9.0",
-            "to_version": "1.0.0",
+            "from_version": "1.0.0",
+            "to_version": "1.1.0",
             "outcome": "ok",
             "authorized_by": "Site administrator",
         },
     )
     current = UpdateStatus(
         level=LEVEL_OK,
-        headline="Version 1.0.0 is up to date",
+        headline="Version 1.1.0 is up to date",
         detail="This terminal is running the latest verified published release.",
-        installed_version="1.0.0",
+        installed_version="1.1.0",
         managed=True,
         state="active",
         channel=current_channel,
-        latest_version="1.0.0",
+        latest_version="1.1.0",
         history=history,
     )
     available = UpdateStatus(
         level=LEVEL_ATTENTION,
-        headline="Version 1.1.0 is available",
+        headline="Version 1.2.0 is available",
         detail=(
             "A newer signed release is published. Download it on another computer "
             "and prepare the documented update drive."
         ),
-        installed_version="1.0.0",
+        installed_version="1.1.0",
         managed=True,
         state="active",
         channel=next_channel,
         update_available=True,
-        latest_version="1.1.0",
+        latest_version="1.2.0",
         history=history,
     )
     ready = UpdateStatus(
         level=LEVEL_ATTENTION,
-        headline="Version 1.1.0 is verified and ready",
+        headline="Version 1.2.0 is verified and ready",
         detail=(
             "The package on FLOORTERM passed its signature, manifest, and "
             "executable checksum checks."
         ),
-        installed_version="1.0.0",
+        installed_version="1.1.0",
         managed=True,
         state="active",
         channel=next_channel,
         update_available=True,
-        latest_version="1.1.0",
+        latest_version="1.2.0",
         staged=staged,
         media_mount="/media/operator/FLOORTERM",
-        rollback_version="0.9.0",
+        rollback_version="1.0.0",
         history=history,
     )
     blocked = UpdateStatus(
@@ -201,7 +201,7 @@ def _snapshots():
             "The signed release channel is unreachable. Reporting and line "
             "response remain fully available; retry later or use an update drive."
         ),
-        installed_version="1.0.0",
+        installed_version="1.1.0",
         managed=True,
         state="active",
         channel_error="Release channel is unreachable",

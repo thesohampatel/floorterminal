@@ -22,22 +22,22 @@ start on an older image, update the supported OS or build from source on that ta
 ## 1. Download the release
 
 Open the repository's **Releases** area and select the required version. For version
-1.0.0, download both the Linux ARM64 archive and its separately published archive
+1.1.0, download both the Linux ARM64 archive and its separately published archive
 digest/signature when available. Do not download source-code archives when you need
 the ready-to-run executable.
 
 Recommended asset names:
 
 ```text
-floorterminal-v1.0.0-linux-arm64.tar.gz
-floorterminal-v1.0.0-linux-arm64.tar.gz.sha256
+floorterminal-v1.1.0-linux-arm64.tar.gz
+floorterminal-v1.1.0-linux-arm64.tar.gz.sha256
 ```
 
 Transfer the files to the Pi with a browser, managed deployment system, removable
 media, or `scp`. Example from another computer:
 
 ```bash
-scp floorterminal-v1.0.0-linux-arm64* pi@PI_ADDRESS:~/Downloads/
+scp floorterminal-v1.1.0-linux-arm64* pi@PI_ADDRESS:~/Downloads/
 ```
 
 ## 2. Verify before extraction
@@ -46,7 +46,7 @@ If an archive digest is supplied:
 
 ```bash
 cd ~/Downloads
-sha256sum -c floorterminal-v1.0.0-linux-arm64.tar.gz.sha256
+sha256sum -c floorterminal-v1.1.0-linux-arm64.tar.gz.sha256
 ```
 
 Compare the displayed digest with the value shown on the trusted GitHub Release over
@@ -56,8 +56,8 @@ Extract the versioned top-level directory:
 
 ```bash
 cd ~/Downloads
-tar -xzf floorterminal-v1.0.0-linux-arm64.tar.gz
-cd floorterminal-v1.0.0-linux-arm64
+tar -xzf floorterminal-v1.1.0-linux-arm64.tar.gz
+cd floorterminal-v1.1.0-linux-arm64
 ```
 
 The bundle's own manifest protects every delivered file:

@@ -31,7 +31,7 @@ from .i18n import load_translator
 from .integration import discover_connectors
 from .services import ExternalIntegration, NoIntegrationProvider
 from .storage.audit import ActivityLogger
-from .storage.state import StateIntegrityError, StateStore
+from .storage.state import StateIntegrityError, StateSaveError, StateStore
 from .ui.responsive import (
     DESIGN_HEIGHT,
     DESIGN_WIDTH,
@@ -41,6 +41,60 @@ from .ui.responsive import (
 from .ui.settings import SettingsWindow
 from .ui.view import RESPONDER_PAGE_SIZE, OperatorViewMixin
 from .update import UpdateService
+
+#: Tk sizes fonts in points and converts them with the X server's reported DPI.
+#: The 800x480 design and its layout tests assume 96 DPI, so X11 displays are
+#: pinned to it; otherwise a panel reporting its physical size (for example a
+#: 7-inch DSI display at ~130 DPI) enlarges every label relative to its shape.
+DESIGN_POINTS_PER_PIXEL = 96 / 72
+
+#: Human-readable names for touch controls, used when an action fails so the
+#: operator and the audit log identify the operation instead of a generic error.
+CONTROL_DESCRIPTIONS = {
+    "primary": "Main workflow action",
+    "confirm": "Confirmation",
+    "cancel": "Closing a dialog",
+    "start_engineers": "Confirming the Engineering crew",
+    "crew": "Updating the Engineering crew",
+    "planned_work": "Opening planned Engineering work",
+    "planned_preventive": "Starting preventive maintenance",
+    "planned_change": "Starting a modification or change",
+    "sync_pending": "Synchronizing queued updates",
+    "settings": "Opening Settings",
+    "about": "Opening Software Information",
+    "software_update": "Opening Software Update",
+    "engineering": "Calling Engineering",
+    "quality": "Calling Quality",
+    "production": "Calling Production",
+    "zone_all": "Selecting the entire line",
+    "failure_done": "Saving failure details",
+    "failure_remove": "Deselecting a station",
+    "failure_all": "Selecting all failure types",
+    "failure_clear": "Clearing failure types",
+    "members_search": "Filtering the Engineering team",
+    "members_prev": "Paging the Engineering team",
+    "members_next": "Paging the Engineering team",
+    "stations_prev": "Paging stations",
+    "stations_next": "Paging stations",
+    "pwd_enter": "Submitting the keyboard entry",
+    "error_dismiss": "Closing the error message",
+}
+CONTROL_PREFIXES = (
+    ("zone_", "Selecting a station"),
+    ("failure_", "Choosing a failure type"),
+    ("member_", "Selecting an engineer"),
+    ("pwd_", "Typing on the touch keyboard"),
+    ("update_", "Using the Software Update panel"),
+)
+
+
+def describe_control(key):
+    if key in CONTROL_DESCRIPTIONS:
+        return CONTROL_DESCRIPTIONS[key]
+    for prefix, description in CONTROL_PREFIXES:
+        if str(key).startswith(prefix):
+            return description
+    return f"Touch control {key!r}" if key else "Screen update"
 
 
 class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, OperatorViewMixin):
@@ -110,6 +164,9 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         self.events = queue.Queue()
         self.busy = False
         self.modal = None
+        self.error_panel = None
+        self.render_blocked = False
+        self.ui_context = ""
         self.toast_text, self.toast_kind, self.toast_until = "", "info", 0
         self.animation_start = time.monotonic()
         self.pressed = None
@@ -136,6 +193,7 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
 
         root.title(f"{self.project_profile.product_name} • {self.provider.INFO.display_name}")
         root.configure(bg=self.BG)
+        self.font_scaling = self.pin_font_scaling(root)
         root.report_callback_exception = self.callback_error
         screen_width, screen_height = (
             root.winfo_screenwidth(),
@@ -161,6 +219,7 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             bd=0,
             highlightthickness=0,
         )
+        self.canvas.aa_backdrop = self.BG
         self.canvas.set_viewport(width, height)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", self.on_canvas_resize)
@@ -177,6 +236,24 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         root.after(30_000, self.escalation_tick)
         if self.provider.connected:
             threading.Thread(target=self.fetch_api_identity, daemon=True).start()
+
+    def pin_font_scaling(self, root):
+        """Make text size independent of the display's reported DPI on X11."""
+        try:
+            original = float(root.tk.call("tk", "scaling"))
+            if str(root.tk.call("tk", "windowingsystem")) != "x11":
+                return original
+            if abs(original - DESIGN_POINTS_PER_PIXEL) > 0.01:
+                root.tk.call("tk", "scaling", DESIGN_POINTS_PER_PIXEL)
+                self.logger.log(
+                    "display_font_scaling_pinned",
+                    reported_pixels_per_point=round(original, 4),
+                    applied_pixels_per_point=round(DESIGN_POINTS_PER_PIXEL, 4),
+                )
+            return DESIGN_POINTS_PER_PIXEL
+        except (tk.TclError, ValueError) as exc:
+            self.logger.log("display_font_scaling_unavailable", "WARNING", error=str(exc))
+            return None
 
     def _load_brand_images(self):
         """Load fixed-size identity assets without depending on the launch directory."""
@@ -322,43 +399,98 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             )
 
     def callback_error(self, exc_type, exc_value, exc_traceback):
-        """Never leave an unexplained white screen if a Tk callback fails."""
+        """Report an unexpected Tk callback failure without losing the screen.
+
+        The explanation is part of the rendered frame, so the animation loop
+        cannot paint over it; it stays until the operator dismisses it.
+        """
         traceback.print_exception(exc_type, exc_value, exc_traceback)
+        context = getattr(self, "ui_context", "") or "Screen update"
         self.logger.log(
             "ui_callback_failed",
             "CRITICAL",
-            error=str(exc_value),
+            context=context,
+            error=f"{exc_type.__name__}: {exc_value}",
             traceback="".join(
                 traceback.format_exception(exc_type, exc_value, exc_traceback)
             ),
         )
+        self.show_error_panel(
+            context,
+            exc_value if isinstance(exc_value, Exception) else RuntimeError(str(exc_value)),
+            unexpected=True,
+        )
+        self.safe_render()
+
+    def show_error_panel(self, operation, error, *, unexpected=False):
+        """Show a persistent, specific explanation of a failed operation."""
+        operation = str(operation or "Operation").strip().rstrip("….").strip()
+        message = " ".join(str(error).split()) or error.__class__.__name__
+        if isinstance(error, StateSaveError):
+            title = "Line state could not be saved"
+        elif unexpected:
+            title = "Unexpected interface error"
+        else:
+            title = f"{operation} did not finish"
+        self.error_panel = {
+            "title": title,
+            "operation": operation,
+            "message": message if len(message) <= 320 else message[:319] + "…",
+            "state_failure": isinstance(error, StateSaveError),
+            "time": datetime.now().astimezone().strftime("%H:%M:%S"),
+        }
+        self.play_sound("error")
+
+    def dismiss_error_panel(self):
+        panel = self.error_panel
+        self.error_panel = None
+        self.render_blocked = False
+        if panel:
+            self.logger.log(
+                "error_message_acknowledged",
+                operation=panel.get("operation"),
+                title=panel.get("title"),
+            )
+
+    def safe_render(self):
+        """Render, or fall back to a static explanation if drawing itself fails."""
+        try:
+            self.render()
+            self.render_blocked = False
+        except Exception as exc:
+            self.render_blocked = True
+            self.logger.log(
+                "ui_render_failed",
+                "CRITICAL",
+                error=f"{exc.__class__.__name__}: {exc}",
+                traceback=traceback.format_exc(),
+            )
+            self.draw_static_error(exc)
+
+    def draw_static_error(self, exc):
+        """Minimal drawing used only when the normal frame cannot be drawn."""
+        panel = self.error_panel or {}
         try:
             self.canvas.delete("all")
-            self.canvas.configure(bg="#FDECEC")
+            self.hitboxes = {}
+            self.canvas.create_rectangle(0, 0, 800, 480, fill="#FDECEC", outline="")
             self.canvas.create_text(
-                400,
-                170,
-                text="Application could not render",
-                font=self.font(22, "bold"),
-                fill=self.RED,
-                anchor="center",
+                400, 150, text=panel.get("title", "The screen could not be drawn"),
+                font=self.font(20, "bold"), fill="#B42331", anchor="center",
             )
             self.canvas.create_text(
-                400,
-                220,
-                text=str(exc_value),
-                font=self.font(11),
-                fill=self.TEXT,
-                width=650,
-                anchor="center",
+                400, 200, text=f"During: {panel.get('operation', 'Screen update')}",
+                font=self.font(11, "bold"), fill="#14213D", anchor="center",
             )
             self.canvas.create_text(
-                400,
-                275,
-                text="Copy the Terminal error and send it for support.",
-                font=self.font(10),
-                fill=self.MUTED,
-                anchor="center",
+                400, 250, text=panel.get("message") or f"{exc.__class__.__name__}: {exc}",
+                font=self.font(10), fill="#14213D", width=640, anchor="center",
+            )
+            self.canvas.create_text(
+                400, 320,
+                text="The saved line state is unchanged. Touch anywhere to try again; "
+                "if this screen returns, note the time and contact support.",
+                font=self.font(9), fill="#4A5568", width=620, anchor="center",
             )
         except Exception:
             traceback.print_exc()
@@ -373,6 +505,8 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         return max(0, int(time.time() - (started or time.time())))
 
     def on_press(self, event):
+        if self.render_blocked:
+            return
         x, y = self.canvas.to_logical(event.x, event.y)
         for key, box in reversed(list(self.hitboxes.items())):
             if box[0] <= x <= box[2] and box[1] <= y <= box[3]:
@@ -380,6 +514,17 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
                 break
 
     def on_keypress(self, event):
+        if self.error_panel or self.render_blocked:
+            if event.keysym in ("Return", "KP_Enter"):
+                self.dismiss_error_panel()
+                self.safe_render()
+            return
+        try:
+            self._handle_keypress(event)
+        except Exception as exc:
+            self.report_ui_error("Typing on the keyboard", exc)
+
+    def _handle_keypress(self, event):
         if not self.modal or self.modal.get("kind") not in {"password", "text_input"}:
             return
         if event.keysym in ("Return", "KP_Enter"):
@@ -398,6 +543,34 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             self.modal["value"] += event.char
 
     def on_release(self, event):
+        if self.render_blocked:
+            # The static fallback has no controls: any touch acknowledges it.
+            self.pressed = None
+            self.dismiss_error_panel()
+            self.safe_render()
+            return
+        key = self.pressed
+        self.ui_context = describe_control(key)
+        try:
+            self._handle_release(event)
+        except Exception as exc:
+            self.report_ui_error(describe_control(key), exc)
+        finally:
+            self.ui_context = ""
+
+    def report_ui_error(self, operation, exc):
+        """Log a failed touch action with its control and explain it on screen."""
+        self.logger.log(
+            "ui_action_failed",
+            "ERROR",
+            operation=operation,
+            error=f"{exc.__class__.__name__}: {exc}",
+            traceback=traceback.format_exc(),
+            machine_status=self.state.get("status"),
+        )
+        self.show_error_panel(operation, exc)
+
+    def _handle_release(self, event):
         x, y = self.canvas.to_logical(event.x, event.y)
         key = self.pressed
         self.pressed = None
@@ -405,6 +578,10 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             return
         box = self.hitboxes[key]
         if not (box[0] <= x <= box[2] and box[1] <= y <= box[3]):
+            return
+        if self.error_panel:
+            if key == "error_dismiss":
+                self.dismiss_error_panel()
             return
         if self.modal:
             if key == "cancel":
@@ -511,13 +688,19 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
                     )
             elif key == "confirm":
                 kind = self.modal.get("kind")
+                requested_at = self.modal.get("requested_at")
                 self.modal = None
                 if kind == "confirm_downtime":
                     self.logger.log("downtime_confirmation_accepted")
                     self.perform("Recording downtime…", self.report_downtime)
                 else:
                     self.logger.log("completion_confirmation_accepted")
-                    self.perform("Completing repair", self.finish_work)
+                    self.perform(
+                        "Releasing the line to Production"
+                        if self.state.get("status") == "ENGINEERING"
+                        else "Completing repair",
+                        lambda: self.finish_work(requested_at),
+                    )
             elif key.startswith("failure_"):
                 action = key.removeprefix("failure_")
                 selected = self.modal["selected"]
@@ -550,13 +733,17 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         elif key == "primary":
             self.primary_action()
         elif key == "sync_pending":
-            if self.state.get("pending_planned_work"):
-                self.perform(
-                    "Synchronizing planned work start…",
-                    self.sync_pending_planned_work,
+            if not self.provider.connected:
+                self.notify(
+                    "Updates are safely queued locally • connector unavailable",
+                    "error",
+                    8,
                 )
             else:
-                self.primary_action()
+                self.perform(
+                    "Synchronizing queued updates…",
+                    lambda: self.synchronize_due_work(force=True),
+                )
         elif key == "planned_work":
             self.open_planned_work()
         elif key == "crew":
@@ -599,41 +786,79 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             machine_status=self.state.get("status"),
         )
 
-    def perform(self, working, function, on_success=None):
+    def perform(self, working, function, on_success=None, *, quiet=False):
+        """Run one operation off the UI thread.
+
+        ``quiet`` marks automatic background work: it shows no progress message
+        and reports a failure as a short notice instead of a dialog, because no
+        operator is waiting on it.
+        """
         if self.busy:
-            return
+            return False
         self.busy = True
-        self.notify(working, "info", 15)
+        if not quiet:
+            self.notify(working, "info", 15)
         self.logger.log("operation_started", operation=working)
 
         def worker():
             try:
                 result = function()
                 self.logger.log("operation_completed", operation=working, result=result)
-                self.events.put((True, result, on_success))
+                self.events.put((True, result, on_success, working, quiet))
             except Exception as exc:
                 self.logger.log(
-                    "operation_failed", "ERROR", operation=working, error=str(exc)
+                    "operation_failed",
+                    "ERROR",
+                    operation=working,
+                    error=str(exc),
+                    error_type=exc.__class__.__name__,
                 )
-                self.events.put((False, str(exc), None))
+                self.events.put((False, exc, None, working, quiet))
 
         threading.Thread(target=worker, daemon=True).start()
+        return True
 
     def poll_events(self):
         try:
-            ok, result, callback = self.events.get_nowait()
-            self.busy = False
-            if ok and callback:
-                callback(result)
-            else:
-                self.notify(str(result), "success" if ok else "error", 5)
+            item = self.events.get_nowait()
         except queue.Empty:
-            pass
-        self.check_api_limit_warning()
-        self.root.after(100, self.poll_events)
+            item = None
+        if item is not None:
+            ok, result, callback = item[:3]
+            working, quiet = (item[3], item[4]) if len(item) >= 5 else ("", False)
+            self.busy = False
+            try:
+                if ok and callback:
+                    self.ui_context = working or "Screen update"
+                    callback(result)
+                elif ok:
+                    if result or not quiet:
+                        self.notify(str(result), "success", 5)
+                elif quiet:
+                    self.notify(str(result), "error", 8)
+                else:
+                    self.show_error_panel(working or "Operation", result)
+            except Exception as exc:
+                self.report_ui_error(working or "Screen update", exc)
+            finally:
+                self.ui_context = ""
+        try:
+            self.check_api_limit_warning()
+        finally:
+            self.root.after(100, self.poll_events)
 
     def save_state(self):
-        self.state_store.save()
+        try:
+            self.state_store.save()
+        except StateSaveError as exc:
+            self.logger.log(
+                "state_save_failed",
+                "CRITICAL",
+                error=str(exc),
+                machine_status=self.state.get("status"),
+                response_record_id=self.state.get("response_record_id"),
+            )
+            raise
         self.logger.log(
             "state_saved",
             machine_status=self.state.get("status"),

@@ -2,6 +2,95 @@
 
 This project follows semantic versioning for published releases.
 
+## 1.1.0
+
+Reliability, clarity, and display-quality release. Upgrading from 1.0.0 needs no
+configuration or connector changes, and an idle state file stays readable by
+1.0.0, so one-touch rollback keeps working.
+
+### Fixed
+
+- **Repair and planned-work completion saved reliably.** `work_label` and
+  `work_type` are now part of the validated state schema. Completing a repair, or
+  starting and releasing planned Engineering work, no longer fails with
+  "Persisted state contains unsupported fields".
+- **No inconsistent state after a failed save.** Every save validates an isolated
+  snapshot before an atomic write. If validation or the write fails, the live
+  state is restored in place to the last saved snapshot. The screen can no longer
+  show Production running while the file still says a repair is active, and one
+  rejected value can no longer make station selection, crew confirmation,
+  downtime recording, synchronization, and support calls fail afterwards.
+- **Release time is not extended by a retry.** The operator's confirmation time
+  is recorded first. If the release itself cannot be saved, a later confirmation
+  (including after a restart) records the original release time. The
+  micro-stop/downtime classification therefore does not change, and the dialog
+  says which time will be recorded.
+- **Line release is one atomic transition.** The release, the queued
+  response-record comment and DONE status, the asset Online state, and the
+  completion notifications are committed in a single save before any network
+  call. An interruption at any point leaves those updates queued for automatic
+  retry instead of losing them.
+- **Completion updates are always attempted.** Asset Online, the completion
+  comment, DONE status, and completion chats are no longer skipped when an
+  earlier step fails.
+- **Truthful completion messages.** The status line in completion chats is built
+  when the message is actually sent. It says "DONE update queued" or "ONLINE
+  update queued" until those updates have really succeeded, instead of always
+  claiming "DONE • ONLINE".
+- **A queued DONE is not lost to the next incident.** Completion status updates
+  have their own queue and are no longer overwritten when the next repair starts.
+- **Specific, persistent error messages.** A failed touch action or operator
+  operation opens a panel naming the operation (for example "Completing repair"),
+  the error, and the saved line status. The panel stays until acknowledged. The
+  animation loop can no longer paint over it, and a frame that cannot be drawn is
+  held on a static explanation instead of freezing the kiosk.
+- **Editable team and chat names.** Engineering team and chat or person names in
+  Settings are free text with directory suggestions. Previously they became
+  read-only as soon as a value was configured or a directory was loaded.
+- **Settings usable on a 7-inch panel.** At 800 x 480, Save and Cancel and the
+  station controls are no longer pushed off the window. Descriptions wrap to the
+  window instead of being clipped.
+- **Every documented template placeholder formats.** Placeholders accepted by
+  Settings (such as `{time}` or `{work_label}` in the help message) no longer
+  raise an error at send time.
+
+### Added
+
+- **Durable notification and record-update queues.** Lifecycle chats, support
+  calls, response-record comments, and status changes are queued in the state
+  file and retried with backoff. They are rescheduled from the connector's
+  rate-limit delay (for example FloorTerminal's own 10 requests/minute budget),
+  bounded in size, expired when stale, and audited when abandoned after
+  permanent rejection. Requests for help are sent before other queued messages.
+  A queued support call tells the operator it will be sent automatically.
+- **Asset status notes.** Offline and Online asset statuses carry a
+  plain-language note: the affected stations, the reported failure types, the
+  operator's own "Others" description, and the response-record reference. The
+  Online note also gives the classification and total line time. Wall-clock
+  timestamps are left out because the status has its own start time. The note is
+  sent through the connector's `status_description` field mapping.
+- A header chip and manual retry for any queued external update.
+
+### Display quality
+
+- Rounded controls, cards, and circles are drawn with anti-aliased edges on
+  Raspberry Pi and other X11 displays. This uses cached pre-rendered shapes with
+  binary transparency, so frame cost is unchanged.
+- Text size is pinned to the 96 DPI design scale on X11. A panel that reports its
+  physical size no longer enlarges labels relative to their controls.
+- Settings uses a flat, high-contrast theme with touch-sized tabs, fields,
+  check boxes, list rows, and scroll bars, plus drag-to-scroll on every tab.
+
+### Development
+
+- Workflow tests run against the real state store and restart from the saved
+  file, so a transition the validator rejects fails the suite. The touchscreen
+  sweep also covers the error panel, the release note, editable directory names,
+  and Settings on an 800 x 480 panel.
+- The publication gate accepts a source version newer than the signed channel
+  between releases, and still requires an exact match when auditing release
+  artifacts.
+
 ## 1.0.0
 
 First public open-source release of FloorTerminal.

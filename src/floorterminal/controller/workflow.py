@@ -4,6 +4,12 @@ This is the local-first core. Every transition is persisted before a network
 call is attempted, retries reuse one durable idempotency key, and an
 unavailable connector degrades to a queued local record rather than a lost
 event. Nothing here draws; it changes state and asks the view to repaint.
+
+External side effects that follow a committed transition — response-record
+comments and lifecycle status, and chat notifications — are written to durable
+queues in the same save as the transition, then attempted immediately. A
+failed, rate-limited, or interrupted attempt therefore stays queued and is
+retried automatically, including after a restart.
 """
 
 from __future__ import annotations
@@ -11,6 +17,59 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import UTC, datetime
+
+from ..storage.state import (
+    MAX_QUEUED_MESSAGES,
+    MAX_QUEUED_RECORD_UPDATES,
+    MAX_QUEUED_TEXT_LENGTH,
+    StateSaveError,
+)
+
+#: Automatic synchronization cadence. Individual items keep their own retry
+#: intervals, so a short tick only shortens the wait after a rate-limit window.
+SYNC_TICK_MS = 30_000
+RETRY_BASE_SECONDS = 60
+RETRY_MAX_SECONDS = 15 * 60
+#: A lifecycle notification older than this is no longer operational news.
+LIFECYCLE_MESSAGE_TTL_SECONDS = 12 * 60 * 60
+#: A request for help that could not be sent promptly must not arrive much later.
+SUPPORT_MESSAGE_TTL_SECONDS = 15 * 60
+RECORD_UPDATE_TTL_SECONDS = 72 * 60 * 60
+#: Requests rejected as invalid, unauthorized, or not found are retried a few
+#: times, which covers a Settings correction, and then abandoned with an audit entry.
+PERMANENT_FAILURE_ATTEMPTS = 3
+PERMANENT_HTTP_STATUSES = {400, 401, 403, 404, 410, 422}
+
+
+def _bounded_text(value, limit=MAX_QUEUED_TEXT_LENGTH):
+    text = str(value or "")
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _short_error(exc, limit=240):
+    text = " ".join(str(exc).split()) or exc.__class__.__name__
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def failure_kind(exc):
+    """Classify a connector failure as ``rate_limited``, ``transient`` or ``permanent``."""
+    code = str(getattr(exc, "code", "") or "")
+    status = getattr(exc, "status", None)
+    if code == "RATE_LIMITED" or status == 429:
+        return "rate_limited"
+    if isinstance(status, int) and status in PERMANENT_HTTP_STATUSES:
+        return "permanent"
+    if code in {"UNAVAILABLE", "SERVER", "INVALID_RESPONSE", "UNKNOWN"} or (
+        isinstance(status, int) and status >= 500
+    ):
+        return "transient"
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        return "transient"
+    if code:
+        return "permanent" if code in {"AUTHENTICATION", "PERMISSION"} else "transient"
+    # A missing chat, an unresolvable name, or an invalid mapping is a local
+    # configuration problem: retrying immediately cannot succeed.
+    return "permanent"
 
 
 class WorkflowMixin:
@@ -23,6 +82,43 @@ class WorkflowMixin:
 
     def has_zone_selection(self):
         return bool(self.selected_zones())
+
+    def failure_reasons(self, empty="Not specified at the terminal"):
+        """Selected failure types per station, without free-text notes."""
+        failures = self.state.get("failure_selections", {}) or {}
+        details = [
+            f"{station}: {', '.join(failures[station])}"
+            for station in self.selected_zones()
+            if failures.get(station)
+        ]
+        return "; ".join(details) if details else empty
+
+    def operator_notes(self):
+        """The operator's optional Others descriptions, per station."""
+        failures = self.state.get("failure_selections", {}) or {}
+        notes = self.state.get("failure_notes", {}) or {}
+        return "; ".join(
+            f"{station}: {notes[station]}"
+            for station in self.selected_zones()
+            if notes.get(station) and "Others" in failures.get(station, [])
+        )
+
+    @staticmethod
+    def asset_status_note(heading, zones, reasons, notes="", record=None, extra=()):
+        """Plain-language note stored with an asset status change.
+
+        It says where and why — affected stations, the reported failure types,
+        and the operator's own words — so the note is useful without opening the
+        response record. Times are omitted: the status carries its own start time.
+        """
+        lines = [heading, f"Affected stations: {zones or 'Not specified'}"]
+        lines.append(f"Reason: {reasons or 'Not specified at the terminal'}")
+        if notes:
+            lines.append(f"Operator note: {notes}")
+        lines.extend(line for line in extra if line)
+        if record is not None:
+            lines.append(f"Response record: #{record}")
+        return _bounded_text("\n".join(lines), 1000)
 
     def primary_action(self):
         if self.state.get("pending_planned_work"):
@@ -197,9 +293,387 @@ class WorkflowMixin:
             operation = {
                 "supports_response_record_status": "set_response_record_status",
                 "supports_response_record_assignments": "assign_participants",
+                "supports_response_record_comments": "add_response_record_comment",
+                "supports_messaging": "send_message",
+                "supports_asset_status": "set_asset_status",
             }.get(name, "")
             return bool(operation and hasattr(self.provider, operation))
         return bool(getattr(info, name, False))
+
+    def asset_tracking_enabled(self):
+        return bool(self.config.get("asset_status_tracking", False)) and self._supports(
+            "supports_asset_status"
+        )
+
+    # ------------------------------------------------------------------
+    # Durable queues for work that follows a committed transition
+    # ------------------------------------------------------------------
+
+    def _new_queue_entry(self, ttl_seconds):
+        now = time.time()
+        return {
+            "id": str(uuid.uuid4()),
+            "created_at": now,
+            "expires_at": now + ttl_seconds,
+            "attempts": 0,
+            "last_attempt_at": None,
+            "retry_after_seconds": None,
+            "last_error": "",
+        }
+
+    def _queue_entry_due(self, entry):
+        last_attempt = entry.get("last_attempt_at")
+        if last_attempt is None:
+            return True
+        interval = entry.get("retry_after_seconds") or RETRY_BASE_SECONDS
+        return self.deadline_due(f"outbox:{entry.get('id')}", last_attempt, interval)
+
+    @staticmethod
+    def _queue_entry_expired(entry):
+        expires_at = entry.get("expires_at")
+        return expires_at is not None and time.time() > float(expires_at)
+
+    def _schedule_retry(self, entry, exc):
+        """Record a failed attempt; returns the failure kind and whether to give up."""
+        kind = failure_kind(exc)
+        attempts = int(entry.get("attempts", 1))
+        if kind == "rate_limited":
+            delay = max(5, int(getattr(exc, "retry_after", None) or RETRY_BASE_SECONDS) + 1)
+        else:
+            delay = min(RETRY_MAX_SECONDS, RETRY_BASE_SECONDS * 2 ** max(0, attempts - 1))
+        entry["retry_after_seconds"] = delay
+        entry["last_error"] = _short_error(exc)
+        give_up = kind == "permanent" and attempts >= PERMANENT_FAILURE_ATTEMPTS
+        return kind, give_up, delay
+
+    def _trim_queue(self, queue, limit, event):
+        while len(queue) > limit:
+            # Comments and notifications are dropped before lifecycle status,
+            # which is what closes the response record.
+            victim = next(
+                (item for item in queue if item.get("action") != "status"), queue[0]
+            )
+            queue.remove(victim)
+            self.logger.log(
+                event,
+                "ERROR",
+                queued_at=victim.get("created_at"),
+                record_id=victim.get("record_id"),
+                chat=victim.get("chat"),
+                reason=f"queue limit of {limit} reached",
+            )
+
+    def queued_sync_count(self):
+        state = self.state
+        return sum(
+            (
+                bool(state.get("pending_response_record")),
+                bool(state.get("pending_planned_work")),
+                bool(state.get("pending_response_status")),
+                bool(state.get("pending_participant_assignment")),
+                bool(state.get("asset_status_sync_pending")),
+                len(state.get("pending_record_updates") or []),
+                len(state.get("pending_messages") or []),
+            )
+        )
+
+    def has_queued_sync(self):
+        return self.queued_sync_count() > 0
+
+    def queue_record_update(self, record_id, action, *, status=None, content=None):
+        """Queue one response-record comment or status change without network use."""
+        capability = (
+            "supports_response_record_status"
+            if action == "status"
+            else "supports_response_record_comments"
+        )
+        if not record_id or not self._supports(capability):
+            return None
+        queue = self.state.setdefault("pending_record_updates", [])
+        if action == "status":
+            # The newest lifecycle status for a record supersedes an older one.
+            queue[:] = [
+                item
+                for item in queue
+                if not (item.get("action") == "status" and item.get("record_id") == record_id)
+            ]
+        entry = {
+            **self._new_queue_entry(RECORD_UPDATE_TTL_SECONDS),
+            "record_id": record_id,
+            "action": action,
+        }
+        if action == "status":
+            entry["status"] = status
+        else:
+            entry["content"] = _bounded_text(content)
+        queue.append(entry)
+        self._trim_queue(queue, MAX_QUEUED_RECORD_UPDATES, "record_update_dropped")
+        return entry
+
+    def flush_record_updates(self, force=False):
+        """Deliver queued record updates in order; True when none remain.
+
+        The first rate-limited or transient failure ends the pass, because later
+        requests would fail the same way and each attempt spends connector budget.
+        """
+        queue = self.state.get("pending_record_updates") or []
+        if not queue:
+            return True
+        if not getattr(self.provider, "connected", True):
+            return False
+        for entry in list(queue):
+            if self._queue_entry_expired(entry):
+                queue.remove(entry)
+                self.logger.log(
+                    "record_update_expired",
+                    "CRITICAL",
+                    record_id=entry.get("record_id"),
+                    action=entry.get("action"),
+                    target_status=entry.get("status"),
+                    attempts=entry.get("attempts"),
+                    last_error=entry.get("last_error", ""),
+                )
+                self.save_state()
+                continue
+            if not force and not self._queue_entry_due(entry):
+                continue
+            entry["attempts"] = int(entry.get("attempts", 0)) + 1
+            entry["last_attempt_at"] = time.time()
+            self.save_state()
+            try:
+                if entry["action"] == "status":
+                    self.provider.set_response_record_status(
+                        entry["record_id"], entry["status"]
+                    )
+                else:
+                    self.provider.add_response_record_comment(
+                        entry["record_id"], entry["content"]
+                    )
+            except Exception as exc:
+                kind, give_up, delay = self._schedule_retry(entry, exc)
+                self.logger.log(
+                    "record_update_failed",
+                    "WARNING",
+                    record_id=entry["record_id"],
+                    action=entry["action"],
+                    target_status=entry.get("status"),
+                    attempt=entry["attempts"],
+                    failure=kind,
+                    retry_in_seconds=None if give_up else delay,
+                    error=entry["last_error"],
+                )
+                if give_up:
+                    queue.remove(entry)
+                    self.logger.log(
+                        "record_update_abandoned",
+                        "ERROR",
+                        record_id=entry["record_id"],
+                        action=entry["action"],
+                        target_status=entry.get("status"),
+                        attempts=entry["attempts"],
+                        error=entry["last_error"],
+                    )
+                self.save_state()
+                if kind != "permanent":
+                    break
+                continue
+            queue.remove(entry)
+            self.logger.log(
+                "record_update_synchronized",
+                record_id=entry["record_id"],
+                action=entry["action"],
+                target_status=entry.get("status"),
+                attempt=entry["attempts"],
+                queued_seconds=max(0, int(time.time() - entry["created_at"])),
+            )
+            self.save_state()
+        return not self.state.get("pending_record_updates")
+
+    def post_record_comment(self, record_id, content):
+        """Queue a response-record comment durably and try to deliver it now."""
+        if not self.queue_record_update(record_id, "comment", content=content):
+            return True
+        try:
+            self.save_state()
+        except StateSaveError as exc:
+            self.logger.log(
+                "record_comment_queue_unsaved",
+                "ERROR",
+                response_record_id=record_id,
+                error=str(exc),
+            )
+            try:
+                self.provider.add_response_record_comment(record_id, content)
+            except Exception as send_exc:
+                self.logger.log(
+                    "record_comment_failed",
+                    "WARNING",
+                    response_record_id=record_id,
+                    error=str(send_exc),
+                )
+                return False
+            return True
+        return self.flush_record_updates()
+
+    def queue_message(
+        self,
+        chat_name,
+        content,
+        *,
+        kind="lifecycle",
+        status_record_id=None,
+        ttl_seconds=LIFECYCLE_MESSAGE_TTL_SECONDS,
+    ):
+        """Queue one chat message without network use; returns the entry."""
+        chat = str(chat_name or "").strip()
+        if not chat:
+            return None
+        entry = {
+            **self._new_queue_entry(ttl_seconds),
+            "chat": chat,
+            "content": _bounded_text(content),
+            "kind": kind,
+        }
+        if status_record_id is not None:
+            entry["status_record_id"] = status_record_id
+        queue = self.state.setdefault("pending_messages", [])
+        queue.append(entry)
+        self._trim_queue(queue, MAX_QUEUED_MESSAGES, "lifecycle_chat_dropped")
+        return entry
+
+    def queue_activity_chats(self, config_keys, message, *, status_record_id=None):
+        if not self._supports("supports_messaging"):
+            return []
+        entries, seen = [], set()
+        for key in config_keys:
+            chat_name = str(self.config.get(key, "")).strip()
+            if not chat_name or chat_name.casefold() in seen:
+                continue
+            seen.add(chat_name.casefold())
+            entry = self.queue_message(
+                chat_name, message, status_record_id=status_record_id
+            )
+            if entry:
+                entries.append(entry)
+        return entries
+
+    def completion_status_line(self, record_id):
+        """Describe external completion state as it is when the message is sent."""
+        parts = []
+        if self._supports("supports_response_record_status"):
+            queued = any(
+                item.get("record_id") == record_id and item.get("action") == "status"
+                for item in self.state.get("pending_record_updates") or []
+            )
+            slot = self.state.get("pending_response_status")
+            if isinstance(slot, dict) and slot.get("record_id") == record_id:
+                queued = True
+            parts.append(
+                "Response record: DONE update queued"
+                if queued
+                else "Response record: DONE"
+            )
+        if self.asset_tracking_enabled():
+            if self.state.get("asset_status_sync_pending"):
+                parts.append(
+                    "Asset: ONLINE update queued"
+                    if self.state.get("asset_status_sync_target") == "ONLINE"
+                    else "Asset: superseded by a newer line event"
+                )
+            elif self.state.get("asset_status") == "ONLINE":
+                parts.append("Asset: ONLINE")
+            else:
+                parts.append("Asset: changed by a newer line event")
+        return " • ".join(parts)
+
+    def render_queued_message(self, entry):
+        content = entry["content"]
+        record_id = entry.get("status_record_id")
+        if record_id is None:
+            return content
+        status_line = self.completion_status_line(record_id)
+        return f"{content}\n{status_line}" if status_line else content
+
+    def flush_messages(self, force=False):
+        """Deliver queued chat messages; returns ``{entry id: outcome}``.
+
+        Requests for help go first. Outcomes are ``sent``, ``queued``,
+        ``abandoned`` or ``expired``; entries not attempted are not reported.
+        """
+        outcomes = {}
+        queue = self.state.get("pending_messages") or []
+        if not queue:
+            return outcomes
+        if not self._supports("supports_messaging") or not getattr(
+            self.provider, "connected", True
+        ):
+            return outcomes
+        ordered = sorted(
+            queue, key=lambda item: (item.get("kind") != "support", item["created_at"])
+        )
+        for entry in ordered:
+            if self._queue_entry_expired(entry):
+                queue.remove(entry)
+                outcomes[entry["id"]] = "expired"
+                self.logger.log(
+                    "lifecycle_chat_expired",
+                    "WARNING",
+                    chat=entry["chat"],
+                    message_type=entry["content"].split("\n", 1)[0],
+                    attempts=entry.get("attempts"),
+                    last_error=entry.get("last_error", ""),
+                )
+                self.save_state()
+                continue
+            if not force and not self._queue_entry_due(entry):
+                continue
+            entry["attempts"] = int(entry.get("attempts", 0)) + 1
+            entry["last_attempt_at"] = time.time()
+            self.save_state()
+            try:
+                self.provider.send_message(entry["chat"], self.render_queued_message(entry))
+            except Exception as exc:
+                kind, give_up, delay = self._schedule_retry(entry, exc)
+                if entry.get("kind") == "support" and kind == "permanent":
+                    give_up = True
+                self.logger.log(
+                    "lifecycle_chat_failed",
+                    "WARNING",
+                    chat=entry["chat"],
+                    message_type=entry["content"].split("\n", 1)[0],
+                    attempt=entry["attempts"],
+                    failure=kind,
+                    retry_in_seconds=None if give_up else delay,
+                    error=entry["last_error"],
+                )
+                if give_up:
+                    queue.remove(entry)
+                    outcomes[entry["id"]] = "abandoned"
+                    self.logger.log(
+                        "lifecycle_chat_abandoned",
+                        "ERROR",
+                        chat=entry["chat"],
+                        message_type=entry["content"].split("\n", 1)[0],
+                        attempts=entry["attempts"],
+                        error=entry["last_error"],
+                    )
+                else:
+                    outcomes[entry["id"]] = "queued"
+                self.save_state()
+                if kind != "permanent":
+                    break
+                continue
+            queue.remove(entry)
+            outcomes[entry["id"]] = "sent"
+            self.logger.log(
+                "lifecycle_chat_sent",
+                chat=entry["chat"],
+                message_type=entry["content"].split("\n", 1)[0],
+                attempt=entry["attempts"],
+                queued_seconds=max(0, int(time.time() - entry["created_at"])),
+            )
+            self.save_state()
+        return outcomes
 
     def sync_response_status(self, response_record_id, status):
         """Persist an idempotent lifecycle update before attempting the connector."""
@@ -284,6 +758,8 @@ class WorkflowMixin:
         """Attempt asset synchronization while leaving its durable retry state intact."""
         try:
             self.sync_asset_status(status, downtime_type, description)
+        except StateSaveError:
+            raise
         except Exception:
             return False
         return not self.state.get("asset_status_sync_pending", False)
@@ -359,15 +835,7 @@ class WorkflowMixin:
             f"\nCurrently active: {active_names}\nStations: {self.zone_summary()}\nReported failures: {self.failure_summary()}"
             f"\nUpdated: {now:%Y-%m-%d %H:%M:%S %Z}"
         )
-        try:
-            self.provider.add_response_record_comment(response_record_id, message)
-        except Exception as exc:
-            self.logger.log(
-                "crew_comment_failed",
-                "WARNING",
-                response_record_id=response_record_id,
-                error=str(exc),
-            )
+        self.post_record_comment(response_record_id, message)
         self.send_activity_chats(
             ["engineering_chat_name", "common_activity_chat_name"],
             f"👥 CREW UPDATED • {self.config['line_name']}\nResponse record: #{response_record_id}"
@@ -390,6 +858,7 @@ class WorkflowMixin:
             status="REPAIRING",
             repair_at=time.time(),
             escalated_at=None,
+            completion_confirmed_at=None,
             engineer_ids=ids,
             engineer_names=[m["displayName"] for m in members],
             engineer_history=self.initial_engineer_history(members, joined_at),
@@ -403,20 +872,18 @@ class WorkflowMixin:
         asset_ok = self.try_asset_status(
             "OFFLINE",
             "UNPLANNED",
-            f"Repair active for response record #{response_record_id}; stations: {zone}",
-        )
-        try:
-            self.provider.add_response_record_comment(
+            self.asset_status_note(
+                f"Unplanned downtime • repair in progress • {self.config['line_name']}",
+                zone,
+                self.failure_reasons(),
+                self.operator_notes(),
                 response_record_id,
-                f"🔧 WORK STARTED\nEngineers: {names}\nAffected stations: {zone}\nReported failures: {failures}\nStarted: {now:%Y-%m-%d %H:%M:%S %Z}\nSource: {self.project_profile.product_name}",
-            )
-        except Exception as exc:
-            self.logger.log(
-                "work_started_comment_failed",
-                "WARNING",
-                response_record_id=response_record_id,
-                error=str(exc),
-            )
+            ),
+        )
+        self.post_record_comment(
+            response_record_id,
+            f"🔧 WORK STARTED\nEngineers: {names}\nAffected stations: {zone}\nReported failures: {failures}\nStarted: {now:%Y-%m-%d %H:%M:%S %Z}\nSource: {self._source_name()}",
+        )
         self.send_activity_chats(
             ["engineering_chat_name", "common_activity_chat_name"],
             f"🔧 REPAIR IN PROGRESS • {self.config['line_name']}\nResponse record: #{response_record_id}\nStations: {zone}\nReported failures: {failures}\nEngineers: {names}\nStarted: {now:%H:%M:%S %Z}",
@@ -425,18 +892,38 @@ class WorkflowMixin:
         suffix = "" if assignment_ok and status_ok and asset_ok else " • external sync pending"
         return f"Repair started by {names}{suffix}"
 
+    def format_template(self, key, **values):
+        """Fill a configured message template.
+
+        Settings accepts every documented placeholder in every template, so each
+        one always has a value here; a valid template can never fail to format.
+        """
+        now = datetime.now().astimezone()
+        defaults = {
+            "line": self.config.get("line_name", ""),
+            "zones": self.zone_summary(),
+            "time": now.strftime("%H:%M"),
+            "timestamp": now.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            "department": "Engineering",
+            "condition": "assistance is required",
+            "work_label": self.state.get("work_label") or "Engineering work",
+        }
+        return str(self.config[key]).format(**{**defaults, **values})
+
     def report_downtime(self):
         if not self.has_zone_selection():
             raise RuntimeError("Select the affected station or Entire Line first")
         now = datetime.now().astimezone()
         line = self.config["line_name"]
-        title = self.config["downtime_title_template"].format(
+        title = self.format_template(
+            "downtime_title_template",
             line=line,
             zones=self.zone_summary(),
             time=now.strftime("%H:%M"),
             timestamp=now.isoformat(),
         )
-        desc = self.config["downtime_description_template"].format(
+        desc = self.format_template(
+            "downtime_description_template",
             line=line,
             time=now.strftime("%H:%M"),
             timestamp=now.strftime("%Y-%m-%d %H:%M:%S %Z"),
@@ -453,6 +940,9 @@ class WorkflowMixin:
             response_record_id=None,
             started_at=time.time(),
             repair_at=None,
+            work_label=None,
+            work_type=None,
+            completion_confirmed_at=None,
             pending_response_record={
                 "title": title,
                 "description": desc,
@@ -463,6 +953,8 @@ class WorkflowMixin:
                 "last_attempt_at": None,
                 "zones_summary": self.zone_summary(),
                 "failures_summary": failures,
+                "reasons_summary": self.failure_reasons(),
+                "notes_summary": self.operator_notes(),
             },
             pending_sync_error="",
             asset_status_sync_pending=False,
@@ -545,7 +1037,13 @@ class WorkflowMixin:
         asset_ok = self.try_asset_status(
             "OFFLINE",
             "UNPLANNED",
-            f"Unplanned downtime • RECORD #{number} • {line} • Stations: {zones}",
+            self.asset_status_note(
+                f"Unplanned downtime • {line}",
+                zones,
+                pending.get("reasons_summary") or failures,
+                pending.get("notes_summary", ""),
+                number,
+            ),
         )
         self.send_activity_chats(
             ["engineering_chat_name", "common_activity_chat_name"],
@@ -562,75 +1060,110 @@ class WorkflowMixin:
         suffix = "" if asset_ok else " • asset sync pending"
         return f"Response record #{number} created • recorded downtime synchronized{suffix}"
 
+    def _record_creation_supported(self):
+        info = getattr(self.provider, "INFO", None)
+        return bool(getattr(info, "supports_response_records", False))
+
+    def _queued_creation(self):
+        """The one queued record creation, if any, as ``(kind, pending)``."""
+        if not self._record_creation_supported():
+            return None, None
+        for kind in ("pending_response_record", "pending_planned_work"):
+            pending = self.state.get(kind)
+            if pending:
+                return kind, pending
+        return None, None
+
+    def sync_work_due(self):
+        """Whether any queued external work is due for an automatic attempt."""
+        state = self.state
+        _kind, creation = self._queued_creation()
+        if creation and self.pending_retry_due(creation):
+            return True
+        for key in ("pending_response_status", "pending_participant_assignment"):
+            pending = state.get(key)
+            if isinstance(pending, dict) and self.pending_retry_due(pending):
+                return True
+        if state.get("asset_status_sync_pending") and self.pending_retry_due(
+            state.get("asset_status_sync_context") or {}
+        ):
+            return True
+        return any(
+            self._queue_entry_expired(entry) or self._queue_entry_due(entry)
+            for key in ("pending_record_updates", "pending_messages")
+            for entry in state.get(key) or []
+        )
+
+    def synchronize_due_work(self, force=False):
+        """Attempt every due queued item once, in dependency order.
+
+        Record creation comes first because every later update refers to the
+        created record. ``force`` ignores retry intervals for a manual retry.
+        """
+        state = self.state
+        kind, creation = self._queued_creation()
+        if creation and (force or self.pending_retry_due(creation)):
+            try:
+                if kind == "pending_response_record":
+                    self.sync_pending_downtime()
+                else:
+                    self.sync_pending_planned_work()
+            except StateSaveError:
+                raise
+            except Exception as exc:
+                if kind == "pending_response_record":
+                    self.state["pending_sync_error"] = str(exc)
+                    self.save_state()
+                self.logger.log(
+                    "downtime_sync_deferred"
+                    if kind == "pending_response_record"
+                    else "planned_work_sync_deferred",
+                    "WARNING",
+                    error=str(exc),
+                )
+                subject = (
+                    "Downtime is recorded locally"
+                    if kind == "pending_response_record"
+                    else "Planned work is queued locally"
+                )
+                return f"{subject} • sync pending: {_short_error(exc, 90)}"
+        pending = state.get("pending_response_status")
+        if isinstance(pending, dict) and (force or self.pending_retry_due(pending)):
+            self.sync_response_status(pending["record_id"], pending["status"])
+        pending = state.get("pending_participant_assignment")
+        if isinstance(pending, dict) and (force or self.pending_retry_due(pending)):
+            self.sync_participant_assignment(
+                pending["record_id"], pending.get("team_id"), pending["user_ids"]
+            )
+        context = state.get("asset_status_sync_context") or {}
+        if state.get("asset_status_sync_pending") and (
+            force or self.pending_retry_due(context)
+        ):
+            self.attempt_asset_status()
+        self.flush_record_updates(force=force)
+        self.flush_messages(force=force)
+        remaining = self.queued_sync_count()
+        if not remaining:
+            return "All queued updates synchronized"
+        return (
+            f"{remaining} external update{'s' if remaining != 1 else ''} still queued"
+            " • retrying automatically"
+        )
+
     def sync_pending_tick(self):
         try:
-            if self.provider.connected and not self.busy:
-                if (
-                    self.state.get("pending_response_record")
-                    and self.provider.INFO.supports_response_records
-                    and self.pending_retry_due(self.state["pending_response_record"])
-                ):
-                    self.perform(
-                        "Synchronizing locally recorded downtime…",
-                        self.sync_pending_downtime,
-                    )
-                elif (
-                    self.state.get("pending_planned_work")
-                    and self.provider.INFO.supports_response_records
-                    and self.pending_retry_due(self.state["pending_planned_work"])
-                ):
-                    self.perform(
-                        "Synchronizing planned work start…",
-                        self.sync_pending_planned_work,
-                    )
-                elif self.state.get("pending_response_status"):
-                    pending = self.state["pending_response_status"]
-                    if self.pending_retry_due(pending):
-                        self.perform(
-                            "Synchronizing response status…",
-                            lambda: (
-                                "External response status synchronized"
-                                if self.sync_response_status(
-                                    pending["record_id"], pending["status"]
-                                )
-                                else "External response status remains pending"
-                            ),
-                        )
-                elif self.state.get("pending_participant_assignment"):
-                    pending = self.state["pending_participant_assignment"]
-                    if self.pending_retry_due(pending):
-                        self.perform(
-                            "Synchronizing Engineering assignment…",
-                            lambda: (
-                                "Engineering assignment synchronized"
-                                if self.sync_participant_assignment(
-                                    pending["record_id"],
-                                    pending.get("team_id"),
-                                    pending["user_ids"],
-                                )
-                                else "Engineering assignment remains pending"
-                            ),
-                        )
-                elif self.state.get("asset_status_sync_pending"):
-                    context = self.state.get("asset_status_sync_context") or {}
-                    if self.pending_retry_due(context):
-                        self.perform(
-                            "Synchronizing asset status…",
-                            lambda: (
-                                "Asset status synchronized"
-                                if self.try_asset_status(
-                                    context.get(
-                                        "status",
-                                        self.state.get("asset_status_sync_target"),
-                                    ),
-                                    context.get("downtime_type"),
-                                    context.get("description", ""),
-                                )
-                                else "Asset status remains pending"
-                            ),
-                        )
+            if (
+                getattr(self.provider, "connected", False)
+                and not self.busy
+                and self.sync_work_due()
+            ):
+                self.perform(
+                    "Synchronizing queued updates…",
+                    self.synchronize_due_work,
+                    quiet=True,
+                )
         finally:
-            self.root.after(60_000, self.sync_pending_tick)
+            self.root.after(SYNC_TICK_MS, self.sync_pending_tick)
 
     def deadline_due(self, key, occurred_at, interval_seconds):
         """Use persisted wall time once, then monotonic time within this process."""
@@ -667,7 +1200,9 @@ class WorkflowMixin:
                 and self.deadline_due("downtime-escalation", started, threshold)
                 and not self.busy
             ):
-                self.perform("Escalating unattended downtime…", self.escalate_downtime)
+                self.perform(
+                    "Escalating unattended downtime…", self.escalate_downtime, quiet=True
+                )
         finally:
             self.root.after(30_000, self.escalation_tick)
 
@@ -726,7 +1261,17 @@ class WorkflowMixin:
                 if planned
                 else "Confirm the repair is complete, guards are in place, and the line is safe to operate."
             ),
+            # The operator's touch is the moment Production was released; the
+            # worker that records it may run later.
+            "requested_at": time.time(),
         }
+        earlier = self.state.get("completion_confirmed_at")
+        if isinstance(earlier, (int, float)) and not isinstance(earlier, bool):
+            stamp = datetime.fromtimestamp(earlier).astimezone().strftime("%H:%M:%S")
+            self.modal["note"] = (
+                f"An earlier release at {stamp} was not saved • "
+                f"confirming records Production restored at {stamp}"
+            )
 
     def open_planned_work(self):
         if self.state.get("pending_planned_work"):
@@ -756,8 +1301,10 @@ class WorkflowMixin:
             "time": now.strftime("%H:%M"),
             "timestamp": now.strftime("%Y-%m-%d %H:%M:%S %Z"),
         }
-        title = self.config["planned_work_title_template"].format(**values)
-        description = self.config["planned_work_description_template"].format(**values)
+        title = self.format_template("planned_work_title_template", **values)
+        description = self.format_template(
+            "planned_work_description_template", **values
+        )
         report_id = str(uuid.uuid4())
         description += (
             f"\nSelected line stations: {self.zone_summary()}."
@@ -785,6 +1332,8 @@ class WorkflowMixin:
             "last_attempt_at": None,
             "zones_summary": self.zone_summary(),
             "failures_summary": self.failure_summary(),
+            "reasons_summary": self.failure_reasons(""),
+            "notes_summary": self.operator_notes(),
         }
         self.save_state()
         self.logger.log(
@@ -845,6 +1394,7 @@ class WorkflowMixin:
             repair_at=None,
             work_label=pending["work_label"],
             work_type=pending["work_type"],
+            completion_confirmed_at=None,
             engineer_ids=ids,
             engineer_names=[m["displayName"] for m in members],
             engineer_history=self.initial_engineer_history(members, now.isoformat()),
@@ -859,25 +1409,29 @@ class WorkflowMixin:
         asset_ok = self.try_asset_status(
             "OFFLINE",
             "PLANNED",
-            f"Planned {pending['work_label']} • RECORD #{result.get('reference', result['id'])} • {line} • Stations: {zones}",
+            self.asset_status_note(
+                f"Planned {pending['work_label']} • {line}",
+                zones,
+                pending["work_label"]
+                + (
+                    f" • reported failures: {pending['reasons_summary']}"
+                    if pending.get("reasons_summary")
+                    else ""
+                ),
+                pending.get("notes_summary", ""),
+                result.get("reference", result["id"]),
+                (f"Engineering crew: {names}",),
+            ),
         )
         self.log_event(
             f"{pending['work_label']} RECORD #{result.get('reference', result['id'])}",
             self.PURPLE,
         )
         self.save_state()
-        try:
-            self.provider.add_response_record_comment(
-                result["id"],
-                f"🛠️ PLANNED WORK STARTED\nType: {pending['work_label']}\nEngineers: {names}\nStations: {zones}\nReported failures: {failures}\nStarted: {now:%Y-%m-%d %H:%M:%S %Z}\nSource: {self.project_profile.product_name}",
-            )
-        except Exception as exc:
-            self.logger.log(
-                "planned_work_comment_failed",
-                "WARNING",
-                response_record_id=result["id"],
-                error=str(exc),
-            )
+        self.post_record_comment(
+            result["id"],
+            f"🛠️ PLANNED WORK STARTED\nType: {pending['work_label']}\nEngineers: {names}\nStations: {zones}\nReported failures: {failures}\nStarted: {now:%Y-%m-%d %H:%M:%S %Z}\nSource: {self._source_name()}",
+        )
         self.send_activity_chats(
             ["engineering_chat_name", "common_activity_chat_name"],
             f"🛠️ PLANNED • {pending['work_label'].upper()} STARTED • {line}\nResponse record: #{result.get('reference', result['id'])}\nStations: {zones}\nReported failures: {failures}\nEngineers: {names}",
@@ -885,52 +1439,41 @@ class WorkflowMixin:
         suffix = "" if status_ok and asset_ok else " • external sync pending"
         return f"{pending['work_label']} started • RECORD #{result.get('reference', result['id'])}{suffix}"
 
-    def retry_planned_work_sync(self):
-        """Recover a planned-work start that was interrupted after response-record creation."""
-        response_record_id = self.state.get("response_record_id")
-        if not response_record_id or self.state.get("status") != "ENGINEERING":
-            raise RuntimeError(
-                "There is no planned Engineering workflow to synchronize"
-            )
-        status_ok = self.sync_response_status(response_record_id, "IN_PROGRESS")
-        label = self.state.get("work_label") or "Engineering work"
-        asset_ok = self.try_asset_status(
-            "OFFLINE",
-            "PLANNED",
-            f"Planned {label} • RECORD #{response_record_id} • {self.config['line_name']} • Stations: {self.zone_summary()}",
-        )
-        now = datetime.now().astimezone()
-        try:
-            self.provider.add_response_record_comment(
-                response_record_id,
-                f"🔄 STATUS SYNCHRONIZED\nAsset set OFFLINE (PLANNED).\nStations: {self.zone_summary()}"
-                f"\nRecovered: {now:%Y-%m-%d %H:%M:%S %Z}\nSource: {self.project_profile.product_name}",
-            )
-        except Exception as exc:
-            self.logger.log(
-                "planned_sync_comment_failed",
-                "WARNING",
-                response_record_id=response_record_id,
-                error=str(exc),
-            )
-        self.send_activity_chats(
-            ["engineering_chat_name", "common_activity_chat_name"],
-            f"🔄 PLANNED WORK SYNCHRONIZED • {self.config['line_name']}\nResponse record: #{response_record_id}"
-            f"\nAsset: OFFLINE (PLANNED)\nStations: {self.zone_summary()}",
-        )
-        self.log_event(f"Planned work synchronized • RECORD #{response_record_id}", self.PURPLE)
-        self.save_state()
-        return (
-            "Planned work synchronized • Asset is OFFLINE"
-            if status_ok and asset_ok
-            else "Planned work active • external synchronization pending"
-        )
+    def _source_name(self):
+        profile = getattr(self, "project_profile", None)
+        return getattr(profile, "product_name", "") or "FloorTerminal"
 
-    def finish_work(self):
+    def finish_work(self, confirmed_at=None):
+        """Release the line to Production as one atomic, durable transition.
+
+        The release, the queued response-record completion, the asset state, and
+        the notifications are committed in a single save. Network attempts happen
+        only afterwards, so an interruption at any point leaves every external
+        update queued for automatic retry rather than silently lost.
+        """
         response_record_id = self.state.get("response_record_id")
         if not response_record_id:
             raise RuntimeError("No active maintenance response record")
-        now = datetime.now().astimezone()
+        released_at = float(confirmed_at or time.time())
+        earlier = self.state.get("completion_confirmed_at")
+        if (
+            isinstance(earlier, (int, float))
+            and not isinstance(earlier, bool)
+            and 0 < earlier <= released_at
+        ):
+            # A previous release was confirmed but could not be saved. The line
+            # was released then, so the recorded durations must not grow.
+            released_at = float(earlier)
+            self.logger.log(
+                "completion_uses_first_confirmation",
+                "WARNING",
+                response_record_id=response_record_id,
+                confirmed_at=released_at,
+            )
+        else:
+            self.state["completion_confirmed_at"] = released_at
+            self.save_state()
+        now = datetime.fromtimestamp(released_at).astimezone()
         history = list(self.state.get("engineer_history", []))
         all_names = []
         for name in [record.get("name", "") for record in history] + self.state.get(
@@ -954,33 +1497,48 @@ class WorkflowMixin:
         timeline_text = (
             "\n".join(timeline) or f"- {active_names}: participation times not recorded"
         )
-        base = self.state.get("started_at") or now.timestamp()
-        total = max(0, int(now.timestamp() - base))
+        base = self.state.get("started_at") or released_at
+        total = max(0, int(released_at - base))
         threshold = int(self.config.get("micro_stop_threshold_minutes", 5)) * 60
         event_class = self.classify_downtime(total)
         repair_base = self.state.get("repair_at")
-        repair = max(0, int(now.timestamp() - repair_base)) if repair_base else total
+        repair = max(0, int(released_at - repair_base)) if repair_base else total
         zone = self.zone_summary()
         failures = self.failure_summary()
+        reasons = self.failure_reasons()
+        operator_notes = self.operator_notes()
         selected_stations = self.selected_zones()
-        # The physical release is authoritative. Persist it before any optional
-        # network update so a connector outage cannot leave the kiosk showing a
-        # stopped line after Production has safely resumed.
+        line = self.config["line_name"]
+        planned_label = (
+            self.state.get("work_label")
+            if self.state.get("status") == "ENGINEERING"
+            else None
+        )
+        completion_comment = (
+            f"✅ WORK COMPLETED • {event_class}\nAll engineers involved: {names}\nCrew active at completion: {active_names}"
+            f"\nParticipation history:\n{timeline_text}\nLine stations: {zone}\nReported failures: {failures}"
+            f"\nCompleted: {now:%Y-%m-%d %H:%M:%S %Z}\nTotal line time: {self.format_duration(total)}"
+            f"\nActive work time: {self.format_duration(repair)}\nProduction release confirmed on {self._source_name()}."
+        )
+        completion_message = (
+            f"✅ LINE RELEASED TO PRODUCTION • {event_class} • {line}\nResponse record: #{response_record_id}"
+            + (f"\nWork: {planned_label}" if planned_label else "")
+            + f"\nStations: {zone}\nReported failures: {failures}\nEngineers involved: {names}\nCrew at completion: {active_names}"
+            f"\nTotal line time: {self.format_duration(total)}"
+        )
+
+        # --- one atomic transition -----------------------------------------
+        # The physical release is authoritative. It is persisted together with
+        # every follow-up so neither can exist on disk without the other.
         self.state["status"] = "RUNNING"
         self.log_event(f"Production resumed • {event_class}", self.GREEN)
-        self.logger.log(
-            "downtime_classified",
-            classification=event_class,
-            total_seconds=total,
-            threshold_seconds=threshold,
-            stations=selected_stations,
-        )
         self.state.update(
             response_record_id=None,
             started_at=None,
             repair_at=None,
             work_label=None,
             work_type=None,
+            completion_confirmed_at=None,
             engineer_ids=[],
             engineer_names=[],
             engineer_history=[],
@@ -989,78 +1547,77 @@ class WorkflowMixin:
             failure_notes={},
             escalated_at=None,
         )
-        self.save_state()
-        asset_ok = self.try_asset_status(
+        slot = self.state.get("pending_response_status")
+        if isinstance(slot, dict) and slot.get("record_id") == response_record_id:
+            # Completion supersedes an unsent In Progress update for this record.
+            self.state["pending_response_status"] = None
+        self.queue_record_update(response_record_id, "comment", content=completion_comment)
+        status_queued = self.queue_record_update(response_record_id, "status", status="DONE")
+        asset_queued = self.queue_asset_status(
             "ONLINE",
-            description=(
-                f"Production resumed after RECORD #{response_record_id} • {self.config['line_name']} • "
-                f"Stations: {zone} • Total line time: {self.format_duration(total)}"
+            description=self.asset_status_note(
+                f"Production resumed • {event_class} • {line}",
+                zone,
+                planned_label or reasons,
+                operator_notes,
+                response_record_id,
+                (f"Total line time: {self.format_duration(total)}",),
             ),
         )
-        try:
-            self.provider.add_response_record_comment(
-                response_record_id,
-                f"✅ WORK COMPLETED • {event_class}\nAll engineers involved: {names}\nCrew active at completion: {active_names}"
-                f"\nParticipation history:\n{timeline_text}\nLine stations: {zone}\nReported failures: {failures}"
-                f"\nCompleted: {now:%Y-%m-%d %H:%M:%S %Z}\nTotal line time: {self.format_duration(total)}"
-                f"\nActive work time: {self.format_duration(repair)}\nProduction release confirmed on {self.project_profile.product_name}.",
-            )
-        except Exception as exc:
-            self.logger.log(
-                "completion_comment_failed",
-                "WARNING",
-                response_record_id=response_record_id,
-                error=str(exc),
-            )
-        status_ok = self.sync_response_status(response_record_id, "DONE")
-        self.send_activity_chats(
-            [
-                "engineering_chat_name",
-                "production_chat_name",
-                "common_activity_chat_name",
-            ],
-            f"✅ LINE RELEASED TO PRODUCTION • {event_class} • {self.config['line_name']}\nResponse record: #{response_record_id}"
-            f"\nStations: {zone}\nReported failures: {failures}\nEngineers involved: {names}\nCrew at completion: {active_names}"
-            f"\nTotal line time: {self.format_duration(total)}\nResponse record: DONE • Asset: ONLINE",
+        self.queue_activity_chats(
+            ["engineering_chat_name", "production_chat_name", "common_activity_chat_name"],
+            completion_message,
+            status_record_id=response_record_id if (status_queued or asset_queued) else None,
         )
         self.save_state()
+        self.logger.log(
+            "downtime_classified",
+            classification=event_class,
+            total_seconds=total,
+            threshold_seconds=threshold,
+            stations=selected_stations,
+        )
+        self.logger.log(
+            "production_release_recorded",
+            response_record_id=response_record_id,
+            classification=event_class,
+            total_seconds=total,
+            active_work_seconds=repair,
+            queued_external_updates=self.queued_sync_count(),
+        )
         self.play_sound("restored")
-        suffix = "" if status_ok and asset_ok else " • external sync pending"
+
+        # --- external synchronization; each step stays queued on failure ------
+        asset_ok = self.attempt_asset_status() if asset_queued else True
+        updates_ok = self.flush_record_updates()
+        self.flush_messages()
+        suffix = "" if asset_ok and updates_ok else " • external sync queued"
         return f"Work completed by {names} • Production resumed{suffix}"
 
-    def sync_asset_status(self, status, downtime_type=None, description=""):
-        """Synchronize provider asset state and persist enough data for safe retries."""
-        if (
-            not self.config.get("asset_status_tracking", False)
-            or not self.provider.INFO.supports_asset_status
-        ):
-            return None
+    def queue_asset_status(self, status, downtime_type=None, description=""):
+        """Record the desired asset state durably without network use.
+
+        Returns False when asset tracking is off or the asset is already in the
+        requested state. An unchanged pending target keeps its idempotency key and
+        original context so a retry after an ambiguous timeout cannot duplicate it.
+        """
+        if not self.asset_tracking_enabled():
+            return False
         target = str(status).upper()
         if self.state.get("asset_status") == target and not self.state.get(
             "asset_status_sync_pending"
         ):
-            return self.state.get("asset_status_id")
+            return False
         new_event = (
             not self.state.get("asset_status_sync_pending")
             or self.state.get("asset_status_sync_target") != target
         )
+        context = None if new_event else self.state.get("asset_status_sync_context")
         if new_event:
             self.state["asset_status_sync_key"] = str(uuid.uuid4())
             self.state["asset_status_sync_attempts"] = 0
-            timestamp = (
-                datetime.now(UTC)
-                .isoformat(timespec="milliseconds")
-                .replace("+00:00", "Z")
-            )
+        if context is None:
             context = {
-                "status": target,
-                "downtime_type": downtime_type,
-                "description": str(description or ""),
-                "started_at": timestamp,
-                "last_attempt_at": None,
-            }
-        else:
-            context = self.state.get("asset_status_sync_context") or {
                 "status": target,
                 "downtime_type": downtime_type,
                 "description": str(description or ""),
@@ -1071,8 +1628,27 @@ class WorkflowMixin:
             }
         self.state["asset_status_sync_pending"] = True
         self.state["asset_status_sync_target"] = target
-        context["last_attempt_at"] = time.time()
         self.state["asset_status_sync_context"] = context
+        return True
+
+    def attempt_asset_status(self):
+        """Make one attempt for the queued asset state; never raises connector errors."""
+        if not self.state.get("asset_status_sync_pending"):
+            return True
+        try:
+            self._send_asset_status()
+        except StateSaveError:
+            raise
+        except Exception:
+            return False
+        return not self.state.get("asset_status_sync_pending")
+
+    def _send_asset_status(self):
+        context = self.state["asset_status_sync_context"]
+        target = self.state.get("asset_status_sync_target") or context["status"]
+        if not self.state.get("asset_status_sync_key"):
+            self.state["asset_status_sync_key"] = str(uuid.uuid4())
+        context["last_attempt_at"] = time.time()
         self.state["asset_status_sync_attempts"] = (
             int(self.state.get("asset_status_sync_attempts", 0)) + 1
         )
@@ -1095,8 +1671,11 @@ class WorkflowMixin:
                 error=str(exc),
             )
             self.save_state()
+            display_name = getattr(
+                getattr(self.provider, "INFO", None), "display_name", "Connector"
+            )
             raise RuntimeError(
-                f"{self.provider.INFO.display_name} asset could not be set {target}; workflow is saved and can be retried: {exc}"
+                f"{display_name} asset could not be set {target}; workflow is saved and can be retried: {exc}"
             ) from exc
         record = result.get("assetStatus", result) if isinstance(result, dict) else {}
         status_id = record.get("id") if isinstance(record, dict) else None
@@ -1122,6 +1701,18 @@ class WorkflowMixin:
         )
         return status_id
 
+    def sync_asset_status(self, status, downtime_type=None, description=""):
+        """Synchronize provider asset state and persist enough data for safe retries."""
+        if not self.asset_tracking_enabled():
+            return None
+        target = str(status).upper()
+        if self.state.get("asset_status") == target and not self.state.get(
+            "asset_status_sync_pending"
+        ):
+            return self.state.get("asset_status_id")
+        self.queue_asset_status(status, downtime_type, description)
+        return self._send_asset_status()
+
     @staticmethod
     def format_duration(seconds):
         hours, remainder = divmod(int(seconds), 3600)
@@ -1136,9 +1727,13 @@ class WorkflowMixin:
         def action():
             if not self.provider.connected:
                 raise RuntimeError("Configure and enable connector.json")
-            if not self.provider.INFO.supports_messaging:
+            if not self._supports("supports_messaging"):
                 raise RuntimeError("Messaging is not provided by connector.json")
-            chat_name = self.config.get(name.lower() + "_chat_name", name).strip()
+            chat_name = str(self.config.get(name.lower() + "_chat_name", "")).strip()
+            if not chat_name:
+                raise RuntimeError(
+                    f"No {name} chat is configured • set it in Settings → Connector"
+                )
             now = datetime.now().astimezone()
             line = self.config["line_name"]
             status = self.state.get("status", "RUNNING")
@@ -1148,16 +1743,24 @@ class WorkflowMixin:
                 "REPAIRING": "a repair is in progress",
                 "ENGINEERING": "Engineering has control for planned work",
             }.get(status, "assistance is required")
-            message = self.config["help_message_template"].format(
+            message = self.format_template(
+                "help_message_template",
                 department=name,
                 line=line,
                 condition=condition,
                 timestamp=now.strftime("%H:%M:%S %Z"),
                 zones=self.zone_summary("No station specified"),
+                time=now.strftime("%H:%M"),
+                work_label=self.state.get("work_label") or "",
             )
             if self.failure_summary(""):
                 message += f" Reported failures: {self.failure_summary('')}."
-            self.provider.send_message(chat_name, message)
+            entry = self.queue_message(
+                chat_name,
+                message,
+                kind="support",
+                ttl_seconds=SUPPORT_MESSAGE_TTL_SECONDS,
+            )
             self.log_event(
                 f"{name} support called",
                 {
@@ -1167,29 +1770,65 @@ class WorkflowMixin:
                 }[name],
             )
             self.save_state()
-            self.play_sound("support")
-            return f"Message sent to {name} chat"
+            outcome = self.flush_messages().get(entry["id"], "queued")
+            if outcome == "sent":
+                self.play_sound("support")
+                return f"Message sent to {name} chat"
+            if outcome == "abandoned":
+                raise RuntimeError(
+                    f"{name} was not notified: {entry.get('last_error') or 'the message was rejected'}"
+                )
+            wait = entry.get("retry_after_seconds")
+            self.logger.log(
+                "support_call_queued",
+                "WARNING",
+                department=name,
+                chat=chat_name,
+                retry_in_seconds=wait,
+                error=entry.get("last_error", ""),
+            )
+            return (
+                f"{name} call queued • sending automatically"
+                + (f" in {wait} s" if wait else "")
+            )
 
         self.perform(f"Calling {name}…", action)
 
-    def send_activity_chats(self, config_keys, message):
-        """Best-effort lifecycle broadcasts; response-record state remains authoritative."""
-        if not self.provider.INFO.supports_messaging:
+    def send_activity_chats(self, config_keys, message, *, status_record_id=None):
+        """Queue lifecycle broadcasts durably, then attempt delivery now.
+
+        Response-record state remains authoritative; a notification that cannot be
+        delivered — for example because the connector's request budget is spent —
+        stays queued and is retried automatically instead of being dropped.
+        """
+        entries = self.queue_activity_chats(
+            config_keys, message, status_record_id=status_record_id
+        )
+        if not entries:
             return
-        sent = set()
-        for key in config_keys:
-            chat_name = str(self.config.get(key, "")).strip()
-            if not chat_name or chat_name.casefold() in sent:
-                continue
-            try:
-                self.provider.send_message(chat_name, message)
-                sent.add(chat_name.casefold())
-                self.logger.log(
-                    "lifecycle_chat_sent",
-                    chat=chat_name,
-                    message_type=message.split("\n", 1)[0],
-                )
-            except Exception as exc:
-                self.logger.log(
-                    "lifecycle_chat_failed", "WARNING", chat=chat_name, error=str(exc)
-                )
+        try:
+            self.save_state()
+        except StateSaveError as exc:
+            # The queue could not be persisted and was rolled back; fall back to
+            # one direct attempt so an operational message is still delivered.
+            self.logger.log("lifecycle_chat_queue_unsaved", "ERROR", error=str(exc))
+            for entry in entries:
+                try:
+                    self.provider.send_message(entry["chat"], entry["content"])
+                    self.logger.log(
+                        "lifecycle_chat_sent",
+                        chat=entry["chat"],
+                        message_type=entry["content"].split("\n", 1)[0],
+                    )
+                except Exception as send_exc:
+                    self.logger.log(
+                        "lifecycle_chat_failed",
+                        "WARNING",
+                        chat=entry["chat"],
+                        error=str(send_exc),
+                    )
+            return
+        try:
+            self.flush_messages()
+        except StateSaveError as exc:
+            self.logger.log("lifecycle_chat_state_unsaved", "ERROR", error=str(exc))

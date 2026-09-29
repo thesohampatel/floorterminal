@@ -25,6 +25,11 @@ only and never execute expressions. Test output in an authorized non-production 
 
 - `engineering_team_name`: exact external directory team used for responder lookup
   and assignment when those capabilities are enabled.
+- Team, chat, and person names are free text of at most 120 characters on one
+  line. In Settings they can always be typed; when the connected directory is
+  available its names are offered as suggestions. A name that the loaded directory
+  does not contain is saved, logged, and reported after saving, because a directory
+  may be paged or not yet contain a newly created chat. Matching ignores letter case.
 - `engineering_chat_name`, `quality_chat_name`, `production_chat_name`: destinations
   for the three support controls.
 - `common_activity_chat_name`: optional shared lifecycle destination.
@@ -33,7 +38,11 @@ only and never execute expressions. Test output in an authorized non-production 
 - `response_record_priority`, `response_record_type`, `planned_work_priority`:
   canonical values translated by `connector.json`.
 - `asset_status_tracking`: sends unavailable/available asset transitions only when
-  both an asset identifier and the connector capability are present.
+  both an asset identifier and the connector capability are present. Each status
+  carries a note listing the affected stations, the reported failure types, the
+  operator's own **Others** description, and the response-record reference; the
+  Online note also states the classification and total line time. It is sent
+  through the connector's `status_description` field mapping.
 - `directory_max_pages`: 1–20, default 3. Bounds cursor pagination for every team,
   member, user, and conversation lookup. Each page consumes one request from the
   application-wide 10-request rolling-minute ceiling.

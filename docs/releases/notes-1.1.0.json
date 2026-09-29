@@ -1,0 +1,27 @@
+{
+  "release_title": "FloorTerminal 1.1.0",
+  "release_summary": "Reliability release: repair and planned-work completion is saved atomically, every follow-up update and notification is queued and retried, failures are explained precisely, team and chat names are editable, and the touchscreen renders with anti-aliased edges.",
+  "minimum_upgradable_version": "1.0.0",
+  "features": [
+    "Asset Offline and Online notes list the affected stations, reported failure types and the operator's note",
+    "Queued response-record updates and chat notifications survive rate limits, outages and restarts",
+    "A persistent error panel names the failed operation and the saved line status",
+    "Anti-aliased rounded shapes and DPI-independent text on Raspberry Pi displays",
+    "Cleaner, touch-sized Settings with drag scrolling and wrapped descriptions"
+  ],
+  "fixes": [
+    "Completing a repair or planned work no longer fails to save and leaves the terminal inconsistent",
+    "A save that cannot be completed restores the last saved state instead of poisoning later actions",
+    "A retried release keeps the first confirmed release time, so durations do not grow",
+    "Response-record completion, comments, asset status and messages are no longer skipped",
+    "Completion messages state what was actually synchronized",
+    "Team and chat names can be typed in Settings even when a directory is loaded",
+    "Save and Cancel stay visible in Settings on 800 x 480 panels",
+    "Every documented message-template placeholder formats without error"
+  ],
+  "security": [
+    "State changes are validated on an isolated snapshot before an atomic write",
+    "Bounded durable queues with expiry and audited abandonment",
+    "Idle state files remain readable by 1.0.0 for safe rollback"
+  ]
+}

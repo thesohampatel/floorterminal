@@ -141,7 +141,11 @@ class UpdateViewMixin:
         accent, tint, glyph = self.update_level_style(status.level)
         page = self.modal.get("page", "status")
         x1, y1, x2, y2 = PANEL
-        self.rounded(x1, y1, x2, y2, 25, self.CARD)
+        modal_card = getattr(self, "modal_card", None)
+        if modal_card is not None:
+            modal_card(x1, y1, x2, y2, 25)
+        else:
+            self.rounded(x1, y1, x2, y2, 25, self.CARD)
 
         self.canvas.create_oval(70, 32, 118, 80, fill=tint, outline=accent, width=2)
         self.draw_update_glyph(94, 56, glyph, accent, 1.9)

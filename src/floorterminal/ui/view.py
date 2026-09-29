@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import math
 import time
+from contextlib import nullcontext
 from datetime import datetime
 
 from .. import __version__
 from .contrast import TEXT_MINIMUM, contrast_ratio, readable_label, text_variant
+from .update_view import UpdateViewMixin
 
 #: Responders shown per page. Four keeps every row a full-size touch target on
 #: the smallest supported panel; longer rosters page.
 RESPONDER_PAGE_SIZE = 4
-from .update_view import UpdateViewMixin
+#: Visual radius of an anti-aliased corner relative to the design radius.
+ROUNDED_ARC_RATIO = 0.55
+#: Opaque backdrop drawn behind every dialog.
+MODAL_SCRIM = "#E9EEF5"
 
 
 class OperatorViewMixin(UpdateViewMixin):
@@ -23,6 +28,23 @@ class OperatorViewMixin(UpdateViewMixin):
     def rounded(
         self, x1, y1, x2, y2, radius=16, fill="white", outline="", width=1, tags=()
     ):
+        create_rounded = getattr(self.canvas, "create_rounded", None)
+        if create_rounded is not None:
+            # A Tk smoothed polygon rounds a corner over about half of the
+            # control radius; the true arc uses the same visual radius.
+            item = create_rounded(
+                x1,
+                y1,
+                x2,
+                y2,
+                radius * ROUNDED_ARC_RATIO,
+                fill=fill,
+                outline=outline,
+                width=width,
+                tags=tags,
+            )
+            if item is not None:
+                return item
         points = [
             x1 + radius,
             y1,
@@ -58,6 +80,18 @@ class OperatorViewMixin(UpdateViewMixin):
             width=width,
             tags=tags,
         )
+
+    def surface(self, color):
+        """Context in which anti-aliased edges blend with ``color``."""
+        factory = getattr(self.canvas, "surface", None)
+        return factory(color) if factory is not None else nullcontext()
+
+    def modal_card(self, x1, y1, x2, y2, radius, outline=""):
+        """Draw a dialog card over the scrim; later shapes sit on the card."""
+        with self.surface(MODAL_SCRIM):
+            self.rounded(x1, y1, x2, y2, radius, self.CARD, outline, 1)
+        if hasattr(self.canvas, "aa_backdrop"):
+            self.canvas.aa_backdrop = self.CARD
 
     #: Below this point size text is judged against the normal-text contrast
     #: threshold rather than the large-text one.
@@ -158,22 +192,24 @@ class OperatorViewMixin(UpdateViewMixin):
             radius = min(17, max(9, (height - 12) / 2))
             badge_x = x1 + radius + 10
             badge_y = (y1 + y2) / 2 + offset
-            self.canvas.create_oval(
-                badge_x - radius,
-                badge_y - radius,
-                badge_x + radius,
-                badge_y + radius,
-                fill="#FFFFFF",
-                outline="#E1E7F0",
-                width=1,
-            )
-            self.draw_button_icon(
-                badge_x,
-                badge_y,
-                icon,
-                fill if fg == "white" else self.TEXT,
-                radius,
-            )
+            with self.surface(fill):
+                self.canvas.create_oval(
+                    badge_x - radius,
+                    badge_y - radius,
+                    badge_x + radius,
+                    badge_y + radius,
+                    fill="#FFFFFF",
+                    outline="#E1E7F0",
+                    width=1,
+                )
+            with self.surface("#FFFFFF"):
+                self.draw_button_icon(
+                    badge_x,
+                    badge_y,
+                    icon,
+                    fill if fg == "white" else self.TEXT,
+                    radius,
+                )
             # Icons have their own fixed lane; labels remain centered on every
             # button, so controls align consistently across the whole screen.
         if label:
@@ -558,9 +594,7 @@ class OperatorViewMixin(UpdateViewMixin):
             return
         self.rounded(286, 19, 374, 43, 8, "#F4F6FA", self.BORDER)
         self.text(330, 31, f"{station_count} STATIONS", 7, self.TEXT, "bold", "center")
-        if self.state.get("pending_response_record") or self.state.get(
-            "pending_planned_work"
-        ):
+        if self.has_queued_sync():
             self.rounded(380, 19, 474, 43, 8, "#FFF3E5", self.ORANGE)
             self.text(
                 427,
@@ -620,6 +654,8 @@ class OperatorViewMixin(UpdateViewMixin):
 
     def draw_machine_card(self, phase):
         self.rounded(14, 68, 786, 318, 18, self.CARD, self.BORDER)
+        if hasattr(self.canvas, "aa_backdrop"):
+            self.canvas.aa_backdrop = self.CARD
         status = self.state["status"]
         data = {
             "RUNNING": (
@@ -639,7 +675,7 @@ class OperatorViewMixin(UpdateViewMixin):
             ),
             "ENGINEERING": (
                 self.t("line_reserved"),
-                self.state.get("work_label", "Planned work in progress"),
+                self.state.get("work_label") or "Planned work in progress",
                 self.PURPLE,
             ),
         }[status]
@@ -710,9 +746,10 @@ class OperatorViewMixin(UpdateViewMixin):
             self.BLUE if all_selected else "#CAD8EE",
             1,
         )
-        self.canvas.create_oval(
-            309, 91, 321, 103, fill="white" if all_selected else "#B8C9E2", outline=""
-        )
+        with self.surface(whole_fill):
+            self.canvas.create_oval(
+                309, 91, 321, 103, fill="white" if all_selected else "#B8C9E2", outline=""
+            )
         self.text(
             315,
             97,
@@ -1189,6 +1226,8 @@ class OperatorViewMixin(UpdateViewMixin):
                 self.state.get("asset_status_sync_pending"),
                 self.state.get("pending_response_status"),
                 self.state.get("pending_participant_assignment"),
+                self.state.get("pending_record_updates"),
+                self.state.get("pending_messages"),
             )
         ):
             caption += " • External sync queued"
@@ -1199,6 +1238,8 @@ class OperatorViewMixin(UpdateViewMixin):
             self.text(766, 299, ("CREW  " + crew)[:58], 8, self.MUTED, "bold", "e")
 
     def draw_bottom(self):
+        if hasattr(self.canvas, "aa_backdrop"):
+            self.canvas.aa_backdrop = self.BG
         status = self.state["status"]
         if status == "DOWN" and (
             self.state.get("pending_response_record") or not self.state.get("response_record_id")
@@ -1276,6 +1317,8 @@ class OperatorViewMixin(UpdateViewMixin):
                 self.state.get("asset_status_sync_pending"),
                 self.state.get("pending_response_status"),
                 self.state.get("pending_participant_assignment"),
+                self.state.get("pending_record_updates"),
+                self.state.get("pending_messages"),
             )
         ):
             guide += " • external update queued"
@@ -1394,14 +1437,12 @@ class OperatorViewMixin(UpdateViewMixin):
     def draw_modal(self):
         if not self.modal:
             return
-        self.canvas.create_rectangle(
-            0, 0, 800, 480, fill="#E9EEF5", outline=""
-        )
+        self.canvas.create_rectangle(0, 0, 800, 480, fill=MODAL_SCRIM, outline="")
         if self.modal["kind"] == "failures":
             station = self.modal["station"]
             options = self.modal["options"]
             selected = self.modal["selected"]
-            self.rounded(88, 38, 712, 442, 24, self.CARD)
+            self.modal_card(88, 38, 712, 442, 24)
             self.rounded(116, 62, 176, 112, 15, "#EAF1FF")
             zones = self.config.get("zones", [])
             index_label = f"{zones.index(station) + 1:02}" if station in zones else "—"
@@ -1507,7 +1548,7 @@ class OperatorViewMixin(UpdateViewMixin):
             self.draw_update_panel()
             return
         if self.modal["kind"] == "about":
-            self.rounded(58, 18, 742, 462, 25, self.CARD)
+            self.modal_card(58, 18, 742, 462, 25)
 
             # Product identity and version are visually separate from legal and
             # operational responsibilities, making the panel easy to scan.
@@ -1643,7 +1684,7 @@ class OperatorViewMixin(UpdateViewMixin):
             )
             return
         if self.modal["kind"] == "engineers":
-            self.rounded(100, 44, 700, 456, 22, self.CARD)
+            self.modal_card(100, 44, 700, 456, 22)
             editing = self.modal.get("context", {}).get("kind") == "edit"
             self.text(
                 132,
@@ -1773,7 +1814,7 @@ class OperatorViewMixin(UpdateViewMixin):
             )
             return
         if self.modal["kind"] in {"password", "text_input"}:
-            self.rounded(70, 28, 730, 452, 22, self.CARD)
+            self.modal_card(70, 28, 730, 452, 22)
             self.text(
                 400,
                 55,
@@ -1866,7 +1907,7 @@ class OperatorViewMixin(UpdateViewMixin):
             )
             return
         if self.modal["kind"] == "planned":
-            self.rounded(120, 76, 680, 404, 22, self.CARD)
+            self.modal_card(120, 76, 680, 404, 22)
             self.canvas.create_oval(368, 94, 432, 158, fill="#F0EBFF", outline="")
             self.text(400, 126, "P", 20, self.PURPLE, "bold", "center")
             self.text(
@@ -1903,7 +1944,7 @@ class OperatorViewMixin(UpdateViewMixin):
                 fg=self.TEXT,
             )
             return
-        self.rounded(160, 112, 640, 368, 22, self.CARD)
+        self.modal_card(160, 112, 640, 368, 22)
         color = self.GREEN if self.modal["kind"] == "done" else self.RED
         self.canvas.create_oval(
             368,
@@ -1916,17 +1957,23 @@ class OperatorViewMixin(UpdateViewMixin):
         self.text(
             400, 164, "✓" if color == self.GREEN else "!", 24, color, "bold", "center"
         )
-        self.text(400, 218, self.modal["title"], 18, self.TEXT, "bold", "center")
+        note = self.modal.get("note")
+        self.text(400, 212 if note else 218, self.modal["title"], 18, self.TEXT, "bold", "center")
         self.text(
             400,
-            249,
+            240 if note else 249,
             self.modal["message"],
-            10,
+            9 if note else 10,
             self.MUTED,
             "normal",
             "center",
-            width=390,
+            width=410 if note else 390,
         )
+        if note:
+            # An earlier release was confirmed but not saved; say which time the
+            # record will carry before the operator confirms again.
+            self.rounded(178, 262, 622, 290, 8, "#FFF3E5", "#F2C27D", 1)
+            self.text(400, 276, note, 7, "#8A5A00", "bold", "center", width=430)
         self.button(
             "cancel", (190, 298, 388, 346), self.t("not_yet"), "#E9EDF3", fg=self.TEXT
         )
@@ -1940,6 +1987,8 @@ class OperatorViewMixin(UpdateViewMixin):
     def render(self):
         self.canvas.delete("all")
         self.hitboxes = {}
+        if hasattr(self.canvas, "aa_backdrop"):
+            self.canvas.aa_backdrop = self.BG
         phase = time.monotonic() - self.animation_start
         self.draw_header()
         self.draw_machine_card(phase)
@@ -1950,7 +1999,66 @@ class OperatorViewMixin(UpdateViewMixin):
             self.text(400, 443, "Syncing" + dots, 9, "white", "bold", "center")
         self.draw_toast()
         self.draw_modal()
+        self.draw_error_panel()
+
+    def draw_error_panel(self):
+        """Persistent explanation of a failed operation, above every dialog."""
+        panel = getattr(self, "error_panel", None)
+        if not panel:
+            return
+        self.canvas.create_rectangle(0, 0, 800, 480, fill=MODAL_SCRIM, outline="")
+        self.modal_card(118, 50, 682, 430, 24, "#F0C3C8")
+        self.canvas.create_oval(146, 76, 198, 128, fill="#FDECEE", outline="")
+        self.canvas.create_oval(155, 85, 189, 119, fill=self.RED, outline="")
+        self.text(172, 102, "!", 15, "white", "bold", "center")
+        self.text(
+            216, 80, panel.get("title", "Operation did not finish"), 15, self.TEXT,
+            "bold", width=440,
+        )
+        self.text(
+            216,
+            110,
+            f"DURING: {panel.get('operation', 'Operation').upper()}  •  {panel.get('time', '')}",
+            7,
+            self.MUTED,
+            "bold",
+            width=440,
+        )
+        self.rounded(146, 142, 654, 250, 14, "#FFF1F2", "#F4C9CE", 1)
+        self.text(
+            166, 156, panel.get("message", ""), 9, self.TEXT, "normal", width=468
+        )
+        status_names = {
+            "RUNNING": "PRODUCTION RUNNING",
+            "DOWN": "LINE DOWN",
+            "REPAIRING": "REPAIR IN PROGRESS",
+            "ENGINEERING": "PLANNED ENGINEERING WORK",
+        }
+        saved_status = status_names.get(self.state.get("status"), "UNKNOWN")
+        self.rounded(146, 262, 654, 290, 9, "#F1F4F8")
+        self.text(
+            160, 276, f"SAVED LINE STATUS  •  {saved_status}", 8, self.TEXT, "bold", "w"
+        )
+        guidance = (
+            "The terminal kept the last saved state, so the screen and the record agree. "
+            "Nothing was lost: check the item above, then try again. If it repeats, "
+            "note the time shown and contact support."
+            if panel.get("state_failure")
+            else "The screen shows the state that is actually saved. Try the action "
+            "again; if it repeats, note the time shown and contact support."
+        )
+        self.text(146, 300, guidance, 8, self.MUTED, "normal", width=508)
+        self.button(
+            "error_dismiss", (286, 364, 514, 412), "OK, CONTINUE", self.BLUE, "OK"
+        )
 
     def animate(self):
-        self.render()
-        self.root.after(int(self.config.get("animation_interval_ms", 80)), self.animate)
+        try:
+            if not getattr(self, "render_blocked", False):
+                self.render()
+        finally:
+            # Rescheduled even after a failure, so one bad frame cannot freeze
+            # the kiosk; a persistent failure is held on the static error screen.
+            self.root.after(
+                int(self.config.get("animation_interval_ms", 80)), self.animate
+            )

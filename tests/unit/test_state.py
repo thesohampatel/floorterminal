@@ -3,7 +3,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from floorterminal.storage.state import StateIntegrityError, StateStore
+from floorterminal.storage.state import (
+    INITIAL_STATE,
+    SPARSE_DEFAULTS,
+    StateIntegrityError,
+    StateSaveError,
+    StateStore,
+    validate_state,
+)
 
 
 class StateStoreTests(unittest.TestCase):
@@ -133,6 +140,89 @@ class StateStoreTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(StateIntegrityError, "participants"):
                 StateStore(path)
+
+
+class StateTransactionTests(unittest.TestCase):
+    def test_planned_work_fields_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            store = StateStore(path)
+            store.data.update(
+                status="ENGINEERING",
+                response_record_id="record-7",
+                work_label="Modification / Change",
+                work_type="OTHER",
+            )
+            store.save()
+            restored = StateStore(path).data
+            self.assertEqual(restored["work_label"], "Modification / Change")
+            self.assertEqual(restored["work_type"], "OTHER")
+
+    def test_idle_fields_added_in_this_release_are_not_written(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            store = StateStore(path)
+            store.save()
+            written = json.loads(path.read_text())
+            self.assertFalse(set(SPARSE_DEFAULTS) & set(written))
+            restored = StateStore(path).data
+            self.assertEqual(restored["pending_messages"], [])
+            self.assertIsNone(restored["work_label"])
+
+    def test_failed_save_rolls_back_in_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            store = StateStore(path)
+            store.data.update(status="REPAIRING", response_record_id="record-1")
+            store.save()
+            live = store.data
+            live.update(status="RUNNING", work_label="")
+            with self.assertRaises(StateSaveError):
+                store.save()
+            self.assertIs(store.data, live)
+            self.assertEqual(live["status"], "REPAIRING")
+            self.assertIsNone(live["work_label"])
+            self.assertEqual(json.loads(path.read_text())["status"], "REPAIRING")
+
+    def test_shared_defaults_are_not_mutated_by_a_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = StateStore(Path(directory) / "state.json")
+            store.data["events"].append({"text": "x", "time": "00:00", "color": "#000000"})
+            store.data["pending_messages"].append({})
+            self.assertEqual(INITIAL_STATE["events"], [])
+            self.assertEqual(INITIAL_STATE["pending_messages"], [])
+
+    def test_queued_updates_and_messages_are_validated(self):
+        entry = {
+            "id": "q-1",
+            "created_at": 1.0,
+            "expires_at": 2.0,
+            "attempts": 0,
+            "last_attempt_at": None,
+            "retry_after_seconds": None,
+            "last_error": "",
+        }
+        valid = {
+            **INITIAL_STATE,
+            "pending_record_updates": [
+                {**entry, "record_id": "r-1", "action": "status", "status": "DONE"},
+                {**entry, "id": "q-2", "record_id": 7, "action": "comment", "content": "x"},
+            ],
+            "pending_messages": [
+                {**entry, "id": "m-1", "chat": "Engineering", "content": "Hi", "kind": "support"}
+            ],
+        }
+        validate_state(valid)
+        for broken in (
+            {"pending_record_updates": [{**entry, "record_id": "r", "action": "delete"}]},
+            {"pending_record_updates": [{**entry, "record_id": "r", "action": "status", "status": "OPEN"}]},
+            {"pending_messages": [{**entry, "chat": " ", "content": "Hi"}]},
+            {"pending_messages": [{**entry, "chat": "A", "content": "Hi", "kind": "spam"}]},
+            {"work_label": ""},
+            {"completion_confirmed_at": "yesterday"},
+        ):
+            with self.subTest(broken=broken), self.assertRaises(StateIntegrityError):
+                validate_state({**valid, **broken})
 
 
 if __name__ == "__main__":

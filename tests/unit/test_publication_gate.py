@@ -19,10 +19,28 @@ SPEC.loader.exec_module(gate)
 
 
 class PublicationGateTests(unittest.TestCase):
-    def test_tracked_channel_is_authentic_and_matches_source_identity(self):
+    def test_tracked_channel_is_authentic_and_not_ahead_of_the_source(self):
         channel = gate.check_source_metadata(ROOT)
-        self.assertEqual(channel.release.version, gate.__version__)
+        self.assertLessEqual(
+            gate.version.parse(channel.release.version),
+            gate.version.parse(gate.__version__),
+        )
         gate.check_actions(ROOT)
+
+    def test_a_channel_newer_than_the_source_is_rejected(self):
+        channel = gate.check_source_metadata(ROOT)
+        with self.assertRaises(gate.AuditError):
+            gate.check_release_version(channel, "0.9.0")
+
+    def test_release_artifacts_require_the_channel_for_exactly_this_version(self):
+        channel = gate.check_source_metadata(ROOT)
+        self.assertTrue(
+            gate.check_release_version(channel, channel.release.version, exact=True)
+        )
+        newer = f"{gate.version.parse(channel.release.version).major + 1}.0.0"
+        with self.assertRaises(gate.AuditError):
+            gate.check_release_version(channel, newer, exact=True)
+        self.assertFalse(gate.check_release_version(channel, newer))
 
     def test_accidentally_included_runtime_or_private_files_are_rejected(self):
         for name in (

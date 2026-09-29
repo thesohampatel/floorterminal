@@ -12,9 +12,11 @@ from tkinter import ttk
 
 from ..core.config import (
     COLORBLIND_SAFE_COLORS,
+    DIRECTORY_NAME_SETTINGS,
     STATION_FAILURE_FALLBACK,
     ConfigurationError,
     validate_config,
+    validate_directory_names,
     validate_station_failures,
     write_config,
 )
@@ -29,10 +31,17 @@ from ..integration import (
     write_connector,
 )
 from ..storage.audit import ActivityLogger
+from ..storage.state import StateSaveError
 from ..update import trust as update_trust
 from .responsive import design_scale, fitted_window_geometry
 
 UI_LANGUAGE_CONFIG_KEY = "ui_language"
+#: Settings whose value is a name in the connected service's directory. They are
+#: free text with suggestions: a directory can be unavailable, paged, or not yet
+#: contain a newly created chat, and none of that may block an administrator.
+DIRECTORY_NAME_KEYS = DIRECTORY_NAME_SETTINGS
+FIELD_BORDER = "#B9C7D8"
+INPUT_TEXT = "#14213D"
 
 
 class SettingsWindow:
@@ -63,6 +72,8 @@ class SettingsWindow:
         responsive_scale = design_scale(width, height, 980, 650)
         self.viewport_width, self.compact = width, responsive_scale < 0.8
         self.scale = max(0.7, min(1.6, responsive_scale))
+        # Readable on a 7-inch panel: nothing below 9 pt even when compact.
+        self.minimum_font = 9
         self.current_station = None
         self.stations = [
             {
@@ -81,25 +92,138 @@ class SettingsWindow:
         self.win.geometry(f"{width}x{height}+{x}+{y}")
         self.win.transient(app.root)
         self.win.grab_set()
-        self.font = lambda size, weight="normal": (
-            "Helvetica",
-            max(8, round(size * self.scale)),
-            weight,
-        )
         self.vars = {}
+        self._scroll_areas = []
+        self._wrapped = []
         self.texts = {}
         self.error = tk.StringVar()
         app.connector_inventory = discover_connectors()
         self._styles()
         self._build()
 
+    def font(self, size, weight="normal"):
+        return ("Helvetica", max(self.minimum_font, round(size * self.scale)), weight)
+
+    def px(self, value):
+        """Scale a design length for this window, never below a touch-safe size."""
+        return max(1, round(value * max(self.scale, 0.85)))
+
     def _styles(self):
+        """A flat, high-contrast ttk look that renders the same on every panel."""
+        app = self.app
         style = ttk.Style(self.win)
-        style.configure("Settings.TNotebook", background=self.app.BG, borderwidth=0)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
         style.configure(
-            "Settings.TNotebook.Tab", font=self.font(9, "bold"), padding=(14, 9)
+            "Settings.TNotebook",
+            background=app.BG,
+            borderwidth=1,
+            bordercolor=app.BORDER,
+            lightcolor=app.BORDER,
+            darkcolor=app.BORDER,
+            tabmargins=(0, self.px(4), 0, 0),
         )
-        style.configure("Settings.TCombobox", font=self.font(10), padding=5)
+        style.configure(
+            "Settings.TNotebook.Tab",
+            font=self.font(9, "bold"),
+            padding=(self.px(14), self.px(10)),
+            background="#E3E9F2",
+            foreground=app.MUTED,
+            bordercolor=app.BORDER,
+            lightcolor="#E3E9F2",
+            darkcolor="#E3E9F2",
+            focuscolor=app.BG,
+        )
+        style.map(
+            "Settings.TNotebook.Tab",
+            background=[("selected", "#FFFFFF"), ("active", "#EEF2F8")],
+            foreground=[("selected", app.BLUE), ("active", app.TEXT)],
+            lightcolor=[("selected", "#FFFFFF")],
+            expand=[("selected", (0, self.px(2), 0, 0))],
+        )
+        style.configure(
+            "Settings.TCombobox",
+            padding=(self.px(8), self.px(6)),
+            arrowsize=self.px(18),
+            foreground=INPUT_TEXT,
+            fieldbackground="#FFFFFF",
+            background="#E9EEF5",
+            bordercolor=FIELD_BORDER,
+            lightcolor="#FFFFFF",
+            darkcolor="#FFFFFF",
+            arrowcolor=app.TEXT,
+        )
+        style.map(
+            "Settings.TCombobox",
+            fieldbackground=[("readonly", "#FFFFFF"), ("disabled", "#F1F4F8")],
+            bordercolor=[("focus", app.BLUE)],
+            background=[("active", "#DCE5F0"), ("pressed", "#CFDBEA")],
+        )
+        # A wide, arrow-free scrollbar is easier to drag with a finger.
+        style.layout(
+            "Settings.Vertical.TScrollbar",
+            [
+                (
+                    "Vertical.Scrollbar.trough",
+                    {
+                        "sticky": "ns",
+                        "children": [
+                            ("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})
+                        ],
+                    },
+                )
+            ],
+        )
+        style.configure(
+            "Settings.Vertical.TScrollbar",
+            arrowsize=self.px(18),
+            troughcolor=app.BG,
+            background="#C3CEDD",
+            bordercolor=app.BG,
+            lightcolor="#C3CEDD",
+            darkcolor="#C3CEDD",
+            gripcount=0,
+        )
+        style.map("Settings.Vertical.TScrollbar", background=[("active", "#A9B8CC")])
+        style.configure(
+            "Settings.TCheckbutton",
+            font=self.font(9, "bold"),
+            background="#FFFFFF",
+            foreground=app.TEXT,
+            indicatorsize=self.px(18),
+            indicatormargin=(0, 0, self.px(8), 0),
+            indicatorbackground="#FFFFFF",
+            indicatorforeground=app.BLUE,
+            upperbordercolor=FIELD_BORDER,
+            lowerbordercolor=FIELD_BORDER,
+            padding=(self.px(4), self.px(6)),
+            focuscolor="#FFFFFF",
+        )
+        style.map(
+            "Settings.TCheckbutton",
+            background=[("active", "#FFFFFF")],
+            indicatorbackground=[("selected", app.BLUE), ("pressed", "#DCE5F0")],
+            indicatorforeground=[("selected", "#FFFFFF")],
+        )
+        style.configure(
+            "Settings.TRadiobutton",
+            background="#F7F9FC",
+            indicatorsize=self.px(18),
+            indicatorbackground="#FFFFFF",
+            indicatorforeground=app.BLUE,
+            upperbordercolor=FIELD_BORDER,
+            lowerbordercolor=FIELD_BORDER,
+            focuscolor="#F7F9FC",
+        )
+        style.map(
+            "Settings.TRadiobutton",
+            background=[("active", "#F7F9FC")],
+            indicatorbackground=[("selected", "#FFFFFF"), ("pressed", "#DCE5F0")],
+        )
+        # Drop-down lists follow the field font instead of Tk's tiny default.
+        self.win.option_add("*TCombobox*Listbox.font", self.font(10))
+        self.win.option_add("*TCombobox*Listbox.selectBackground", app.BLUE)
+        self.win.option_add("*TCombobox*Listbox.selectForeground", "#FFFFFF")
 
     def _build(self):
         header = tk.Frame(self.win, bg=self.app.BG)
@@ -119,25 +243,10 @@ class SettingsWindow:
                 fg=self.app.MUTED,
                 bg=self.app.BG,
             ).pack(side="right", pady=7)
-        self.tabs = ttk.Notebook(self.win, style="Settings.TNotebook")
-        self.tabs.pack(fill="both", expand=True, padx=18)
-        self._general_tab()
-        self._integration_tab()
-        self._stations_tab()
-        self._messages_tab()
-        self._system_tab()
-        self._appearance_tab()
+        # Packed before the notebook: on a 480-pixel-high panel the tabs would
+        # otherwise take every remaining pixel and push Save off the screen.
         footer = tk.Frame(self.win, bg=self.app.BG)
-        footer.pack(fill="x", padx=20, pady=12)
-        tk.Label(
-            footer,
-            textvariable=self.error,
-            font=self.font(9, "bold"),
-            fg=self.app.RED,
-            bg=self.app.BG,
-            anchor="w",
-            wraplength=500,
-        ).pack(side="left", fill="x", expand=True)
+        footer.pack(side="bottom", fill="x", padx=20, pady=(8, 12))
         self._button(footer, self.t("cancel"), self.win.destroy, "#DCE5F0", self.app.TEXT).pack(
             side="right", padx=(10, 0)
         )
@@ -148,6 +257,38 @@ class SettingsWindow:
             self.app.BLUE,
             "white",
         ).pack(side="right")
+        error_label = tk.Label(
+            footer,
+            textvariable=self.error,
+            font=self.font(9, "bold"),
+            fg=self.app.RED,
+            bg=self.app.BG,
+            anchor="w",
+            justify="left",
+        )
+        error_label.pack(side="left", fill="x", expand=True)
+        self._autowrap(error_label, footer, 330)
+        self.tabs = ttk.Notebook(self.win, style="Settings.TNotebook")
+        self.tabs.pack(fill="both", expand=True, padx=18)
+        self._general_tab()
+        self._integration_tab()
+        self._stations_tab()
+        self._messages_tab()
+        self._system_tab()
+        self._appearance_tab()
+        self._enable_touch_scrolling()
+
+    def _autowrap(self, label, container, margin=0):
+        """Wrap ``label`` to its container's current width instead of a constant."""
+
+        def update(event=None):
+            width = (event.width if event is not None else container.winfo_width()) - margin
+            if width > 60:
+                label.configure(wraplength=width)
+
+        container.bind("<Configure>", update, add="+")
+        self._wrapped.append(label)
+        return label
 
     def _button(self, parent, text, command, bg, fg):
         return tk.Button(
@@ -161,8 +302,9 @@ class SettingsWindow:
             activeforeground=fg,
             relief="flat",
             bd=0,
-            padx=18,
-            pady=9,
+            highlightthickness=0,
+            padx=self.px(18),
+            pady=self.px(10),
             cursor="hand2",
         )
 
@@ -185,25 +327,62 @@ class SettingsWindow:
                 else localized.get(title, title)
             ),
         )
-        canvas = tk.Canvas(tab, bg=self.app.BG, highlightthickness=0)
-        bar = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
-        body = tk.Frame(canvas, bg=self.app.BG)
+        return self._scroll_area(tab, self.app.BG)
+
+    def _scroll_area(self, parent, background):
+        """A vertically scrollable body that follows its parent's width."""
+        holder = tk.Frame(parent, bg=background)
+        holder.pack(side="left", fill="both", expand=True)
+        canvas = tk.Canvas(holder, bg=background, highlightthickness=0)
+        bar = ttk.Scrollbar(
+            holder,
+            orient="vertical",
+            command=canvas.yview,
+            style="Settings.Vertical.TScrollbar",
+        )
+        body = tk.Frame(canvas, bg=background)
         window = canvas.create_window((0, 0), window=body, anchor="nw")
         canvas.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y", padx=(4, 0))
         canvas.pack(side="left", fill="both", expand=True)
-        bar.pack(side="right", fill="y")
         body.bind(
             "<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         canvas.bind(
             "<Configure>", lambda e: canvas.itemconfigure(window, width=e.width)
         )
-        wheel = lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
-        canvas.bind("<MouseWheel>", wheel)
-        body.bind("<MouseWheel>", wheel)
-        canvas.bind("<Button-4>", lambda _e: canvas.yview_scroll(-1, "units"))
-        canvas.bind("<Button-5>", lambda _e: canvas.yview_scroll(1, "units"))
+        self._scroll_areas.append((canvas, body))
         return body
+
+    def _enable_touch_scrolling(self):
+        """Scroll long tabs by dragging anywhere that is not an input.
+
+        A touchscreen has no wheel, and a thin scrollbar is hard to hit with a
+        finger. Inputs keep their own touch behaviour (cursor, selection, lists).
+        """
+        passive = (tk.Frame, tk.Label, tk.Canvas)
+        for canvas, body in self._scroll_areas:
+
+            def wheel(event, canvas=canvas):
+                delta = event.delta or (120 if getattr(event, "num", 0) == 4 else -120)
+                canvas.yview_scroll(-1 if delta > 0 else 1, "units")
+
+            def press(event, canvas=canvas):
+                canvas.scan_mark(0, event.y_root)
+
+            def drag(event, canvas=canvas):
+                canvas.scan_dragto(0, event.y_root, gain=1)
+
+            pending = [canvas, body]
+            while pending:
+                widget = pending.pop()
+                pending.extend(widget.winfo_children())
+                widget.bind("<MouseWheel>", wheel, add="+")
+                widget.bind("<Button-4>", wheel, add="+")
+                widget.bind("<Button-5>", wheel, add="+")
+                if isinstance(widget, passive):
+                    widget.bind("<ButtonPress-1>", press, add="+")
+                    widget.bind("<B1-Motion>", drag, add="+")
 
     def _section(self, parent, title, description=""):
         box = tk.Frame(
@@ -217,15 +396,39 @@ class SettingsWindow:
             box, text=title, font=self.font(11, "bold"), fg=self.app.TEXT, bg="white"
         ).pack(anchor="w", padx=14, pady=(11, 1))
         if description:
-            tk.Label(
-                box, text=description, font=self.font(8), fg=self.app.MUTED, bg="white"
-            ).pack(anchor="w", padx=14, pady=(0, 5))
+            label = tk.Label(
+                box,
+                text=description,
+                font=self.font(8),
+                fg=self.app.MUTED,
+                bg="white",
+                justify="left",
+                anchor="w",
+            )
+            label.pack(anchor="w", fill="x", padx=14, pady=(0, 5))
+            self._autowrap(label, box, 30)
         form = tk.Frame(box, bg="white")
         form.pack(fill="x", padx=14, pady=(3, 12))
         form.columnconfigure(1, weight=1)
         return form
 
-    def _field(self, parent, row, label, key, value=None, choices=None, secret=False):
+    def _field(
+        self,
+        parent,
+        row,
+        label,
+        key,
+        value=None,
+        choices=None,
+        secret=False,
+        editable=False,
+    ):
+        """One labelled input.
+
+        ``choices`` with ``editable=False`` is a fixed list (a validated setting
+        such as a priority). ``editable=True`` is free text with suggestions, used
+        for names that live in an external directory.
+        """
         label_options = (
             {"textvariable": label}
             if isinstance(label, tk.StringVar)
@@ -236,23 +439,35 @@ class SettingsWindow:
             font=self.font(8, "bold"),
             fg=self.app.MUTED,
             bg="white",
+            justify="left",
             **label_options,
-        ).grid(row=row, column=0, sticky="w", pady=5)
+        ).grid(row=row, column=0, sticky="w", pady=self.px(5))
         var = tk.StringVar(
             value=str(self.app.config.get(key, "") if value is None else value)
         )
         self.vars[key] = var
         if choices is not None:
-            values = list(choices)
-            if var.get() and var.get() not in values:
+            values = [str(item) for item in choices if str(item).strip()]
+            if editable:
+                # Sorted, de-duplicated suggestions; the current value stays
+                # editable even when it is not in the directory.
+                values = sorted(set(values), key=str.casefold)
+            elif var.get() and var.get() not in values:
                 values.insert(0, var.get())
             widget = ttk.Combobox(
                 parent,
                 textvariable=var,
                 values=values,
-                state="readonly" if values else "normal",
+                state="normal" if editable or not values else "readonly",
                 style="Settings.TCombobox",
+                font=self.font(10),
             )
+            if editable:
+                widget.bind(
+                    "<FocusOut>",
+                    lambda _e, variable=var: variable.set(variable.get().strip()),
+                    add="+",
+                )
         else:
             widget = tk.Entry(
                 parent,
@@ -260,12 +475,22 @@ class SettingsWindow:
                 font=self.font(10),
                 show="●" if secret else "",
                 relief="flat",
+                bg="#FFFFFF",
+                fg=INPUT_TEXT,
+                insertbackground=INPUT_TEXT,
                 highlightthickness=1,
-                highlightbackground="#B9C7D8",
+                highlightbackground=FIELD_BORDER,
                 highlightcolor=self.app.BLUE,
             )
-        widget.grid(row=row, column=1, sticky="ew", padx=(16, 0), ipady=5)
+        widget.grid(
+            row=row, column=1, sticky="ew", padx=(16, 0), pady=self.px(3), ipady=self.px(5)
+        )
         return widget
+
+    def _checkbox(self, parent, text, variable):
+        return ttk.Checkbutton(
+            parent, text=text, variable=variable, style="Settings.TCheckbutton"
+        )
 
     def _general_tab(self):
         body = self._scroll_tab("GENERAL")
@@ -307,15 +532,10 @@ class SettingsWindow:
         self.asset_status_tracking = tk.BooleanVar(
             value=bool(self.app.config.get("asset_status_tracking", False))
         )
-        tk.Checkbutton(
+        self._checkbox(
             workflow,
-            text=self.t("settings_synchronize_asset_offline_online_status"),
-            variable=self.asset_status_tracking,
-            font=self.font(9, "bold"),
-            fg=self.app.TEXT,
-            bg="white",
-            activebackground="white",
-            selectcolor="white",
+            self.t("settings_synchronize_asset_offline_online_status"),
+            self.asset_status_tracking,
         ).grid(row=3, column=1, sticky="w", padx=(12, 0), pady=6)
 
     def _integration_tab(self):
@@ -345,14 +565,17 @@ class SettingsWindow:
                 fg=self.app.ORANGE,
                 bg="white",
             ).grid(row=0, column=0, columnspan=2, sticky="w", pady=8)
-            tk.Label(
+            self._autowrap(
+                tk.Label(
+                    form,
+                    text=self.t("settings_place_connector_json_connector_json_connector"),
+                    font=self.font(8),
+                    fg=self.app.MUTED,
+                    bg="white",
+                    justify="left",
+                ),
                 form,
-                text=self.t("settings_place_connector_json_connector_json_connector"),
-                font=self.font(8),
-                fg=self.app.MUTED,
-                bg="white",
-                wraplength=680,
-                justify="left",
+                10,
             ).grid(row=1, column=0, columnspan=2, sticky="w")
         row = 0
         for candidate in inventory.candidates:
@@ -371,13 +594,11 @@ class SettingsWindow:
             card.grid(row=row, column=0, columnspan=2, sticky="ew", pady=5)
             card.columnconfigure(1, weight=1)
             if candidate.valid:
-                tk.Radiobutton(
+                ttk.Radiobutton(
                     card,
                     variable=self.connector_selection,
                     value=candidate.path.name,
-                    bg="#F7F9FC",
-                    activebackground="#F7F9FC",
-                    selectcolor="white",
+                    style="Settings.TRadiobutton",
                 ).grid(row=0, column=0, rowspan=3, padx=8)
             title = definition.display_name if definition else candidate.path.name
             tk.Label(
@@ -409,24 +630,30 @@ class SettingsWindow:
                 detail = "Features: " + (
                     ", ".join(enabled) if enabled else "Local terminal only"
                 )
-            tk.Label(
+            self._autowrap(
+                tk.Label(
+                    card,
+                    text=detail,
+                    font=self.font(8),
+                    fg=self.app.MUTED,
+                    bg="#F7F9FC",
+                    justify="left",
+                ),
                 card,
-                text=detail,
-                font=self.font(8),
-                fg=self.app.MUTED,
-                bg="#F7F9FC",
-                wraplength=650,
-                justify="left",
+                70,
             ).grid(row=2, column=1, sticky="w", pady=(0, 7))
             row += 1
-        tk.Label(
+        self._autowrap(
+            tk.Label(
+                form,
+                text=self.t("settings_validation_is_offline_and_makes_no"),
+                font=self.font(8),
+                fg=self.app.MUTED,
+                bg="white",
+                justify="left",
+            ),
             form,
-            text=self.t("settings_validation_is_offline_and_makes_no"),
-            font=self.font(8),
-            fg=self.app.MUTED,
-            bg="white",
-            wraplength=680,
-            justify="left",
+            10,
         ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 10))
         row += 1
         diagnostics = tk.Frame(form, bg="white")
@@ -435,14 +662,17 @@ class SettingsWindow:
         self.connector_test_status = tk.StringVar(
             value="Test performs local validation plus one safe read-only network request."
         )
-        tk.Label(
+        self._autowrap(
+            tk.Label(
+                diagnostics,
+                textvariable=self.connector_test_status,
+                font=self.font(8, "bold"),
+                fg=self.app.MUTED,
+                bg="white",
+                justify="left",
+            ),
             diagnostics,
-            textvariable=self.connector_test_status,
-            font=self.font(8, "bold"),
-            fg=self.app.MUTED,
-            bg="white",
-            wraplength=520,
-            justify="left",
+            round(self.viewport_width * 0.34),
         ).grid(row=0, column=0, sticky="w")
         self.connector_test_button = self._button(
             diagnostics,
@@ -461,42 +691,27 @@ class SettingsWindow:
             self.app.TEXT,
         ).grid(row=row, column=0, columnspan=2, sticky="e", pady=(0, 10))
         row += 1
+        teams = self.directory.get("teams", []) or []
+        conversations = self.directory.get("conversations", []) or []
+        routing = self._section(
+            body,
+            self.t("settings_team_and_chat_names"),
+            self.t(
+                "settings_team_and_chat_names_directory"
+                if teams or conversations
+                else "settings_team_and_chat_names_manual"
+            ),
+        )
         rows = (
-            (
-                "Engineering assignment team",
-                "engineering_team_name",
-                self.directory.get("teams", []),
-            ),
-            (
-                "Engineering chat or person",
-                "engineering_chat_name",
-                self.directory.get("conversations", []),
-            ),
-            (
-                "Quality chat or person",
-                "quality_chat_name",
-                self.directory.get("conversations", []),
-            ),
-            (
-                "Production chat or person",
-                "production_chat_name",
-                self.directory.get("conversations", []),
-            ),
-            (
-                "Common activity chat or person",
-                "common_activity_chat_name",
-                self.directory.get("conversations", []),
-            ),
+            ("Engineering assignment team", "engineering_team_name", teams),
+            ("Engineering chat or person", "engineering_chat_name", conversations),
+            ("Quality chat or person", "quality_chat_name", conversations),
+            ("Production chat or person", "production_chat_name", conversations),
+            ("Common activity chat or person", "common_activity_chat_name", conversations),
+            ("Escalation chat or person (optional)", "escalation_chat_name", conversations),
         )
-        for field_row, (label, key, choices) in enumerate(rows, row):
-            self._field(form, field_row, label, key, choices=choices)
-        self._field(
-            form,
-            row + len(rows),
-            "Escalation chat or person (optional)",
-            "escalation_chat_name",
-            choices=self.directory.get("conversations", []),
-        )
+        for field_row, (label, key, choices) in enumerate(rows):
+            self._field(routing, field_row, label, key, choices=choices, editable=True)
 
     def _test_selected_connector(self):
         selected = self.connector_selection.get().strip()
@@ -688,28 +903,9 @@ class SettingsWindow:
             fg=self.app.MUTED,
             bg="#F5F8FC",
         ).pack(anchor="w", padx=12, pady=(12, 6))
-        list_frame = tk.Frame(left, bg="#F5F8FC")
-        list_frame.pack(fill="both", expand=True, padx=10)
-        self.station_list = tk.Listbox(
-            list_frame,
-            font=self.font(11, "bold"),
-            bg="white",
-            fg=self.app.TEXT,
-            selectbackground=self.app.BLUE,
-            selectforeground="white",
-            activestyle="none",
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground="#B9C7D8",
-        )
-        scroll = ttk.Scrollbar(
-            list_frame, orient="vertical", command=self.station_list.yview
-        )
-        self.station_list.configure(yscrollcommand=scroll.set)
-        self.station_list.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
+        # Controls are packed first so a short panel shrinks the list, not them.
         controls = tk.Frame(left, bg="#F5F8FC")
-        controls.pack(fill="x", padx=8, pady=10)
+        controls.pack(side="bottom", fill="x", padx=8, pady=10)
         actions = (
             ("+ ADD", self.add_station),
             ("REMOVE", self.remove_station),
@@ -722,8 +918,43 @@ class SettingsWindow:
             )
         controls.columnconfigure(0, weight=1)
         controls.columnconfigure(1, weight=1)
-        right = tk.Frame(shell, bg="white")
-        right.pack(side="left", fill="both", expand=True, padx=18, pady=12)
+        list_frame = tk.Frame(left, bg="#F5F8FC")
+        list_frame.pack(fill="both", expand=True, padx=10)
+        style = ttk.Style(self.win)
+        style.configure(
+            "Settings.Treeview",
+            font=self.font(11, "bold"),
+            rowheight=self.px(36),
+            background="#FFFFFF",
+            fieldbackground="#FFFFFF",
+            foreground=self.app.TEXT,
+            bordercolor=FIELD_BORDER,
+            lightcolor="#FFFFFF",
+            darkcolor="#FFFFFF",
+            indent=0,
+        )
+        style.map(
+            "Settings.Treeview",
+            background=[("selected", self.app.BLUE)],
+            foreground=[("selected", "#FFFFFF")],
+        )
+        # A tree view gives every station a finger-sized row, which a Tk
+        # listbox cannot do without a dated bevelled selection.
+        self.station_list = ttk.Treeview(
+            list_frame, show="tree", selectmode="browse", style="Settings.Treeview"
+        )
+        self.station_list.column("#0", stretch=True)
+        scroll = ttk.Scrollbar(
+            list_frame,
+            orient="vertical",
+            command=self.station_list.yview,
+            style="Settings.Vertical.TScrollbar",
+        )
+        self.station_list.configure(yscrollcommand=scroll.set)
+        self.station_list.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y", padx=(3, 0))
+        right = self._scroll_area(shell, "white")
+        right.configure(padx=18, pady=12)
         tk.Label(
             right,
             text=self.t("settings_station_details"),
@@ -731,13 +962,19 @@ class SettingsWindow:
             fg=self.app.TEXT,
             bg="white",
         ).pack(anchor="w")
-        tk.Label(
+        self._autowrap(
+            tk.Label(
+                right,
+                text=self.t("settings_use_any_user_defined_name_such"),
+                font=self.font(8),
+                fg=self.app.MUTED,
+                bg="white",
+                justify="left",
+                anchor="w",
+            ),
             right,
-            text=self.t("settings_use_any_user_defined_name_such"),
-            font=self.font(8),
-            fg=self.app.MUTED,
-            bg="white",
-        ).pack(anchor="w", pady=(1, 10))
+            40,
+        ).pack(anchor="w", fill="x", pady=(1, 10))
         self.station_name = tk.StringVar()
         name_form = tk.Frame(right, bg="white")
         name_form.pack(fill="x")
@@ -786,15 +1023,20 @@ class SettingsWindow:
                 highlightbackground="#B9C7D8",
                 highlightcolor=self.app.BLUE,
             ).pack(side="left", fill="x", expand=True, ipady=6, padx=(7, 0))
-        tk.Label(
+        self._autowrap(
+            tk.Label(
+                right,
+                text=self.t("settings_leave_unused_rows_blank_at_least"),
+                font=self.font(8, "bold"),
+                fg=self.app.GREEN,
+                bg="white",
+                justify="left",
+                anchor="w",
+            ),
             right,
-            text=self.t("settings_leave_unused_rows_blank_at_least"),
-            font=self.font(8, "bold"),
-            fg=self.app.GREEN,
-            bg="white",
-            justify="left",
-        ).pack(anchor="w", pady=(10, 0))
-        self.station_list.bind("<<ListboxSelect>>", self.select_station)
+            40,
+        ).pack(anchor="w", fill="x", pady=(10, 0))
+        self.station_list.bind("<<TreeviewSelect>>", self.select_station)
         self._refresh_station_list(0)
 
     def _messages_tab(self):
@@ -852,28 +1094,14 @@ class SettingsWindow:
         self.fullscreen = tk.BooleanVar(
             value=bool(self.app.config.get("fullscreen_on_linux", True))
         )
-        tk.Checkbutton(
-            runtime,
-            text=self.t("settings_fullscreen_on_linux"),
-            variable=self.fullscreen,
-            font=self.font(9, "bold"),
-            fg=self.app.TEXT,
-            bg="white",
-            activebackground="white",
-            selectcolor="white",
+        self._checkbox(
+            runtime, self.t("settings_fullscreen_on_linux"), self.fullscreen
         ).grid(row=len(specs), column=1, sticky="w", padx=(12, 0), pady=6)
         self.sound_enabled = tk.BooleanVar(
             value=bool(self.app.config.get("sound_enabled", True))
         )
-        tk.Checkbutton(
-            runtime,
-            text=self.t("settings_operational_sound_cues"),
-            variable=self.sound_enabled,
-            font=self.font(9, "bold"),
-            fg=self.app.TEXT,
-            bg="white",
-            activebackground="white",
-            selectcolor="white",
+        self._checkbox(
+            runtime, self.t("settings_operational_sound_cues"), self.sound_enabled
         ).grid(row=len(specs) + 1, column=1, sticky="w", padx=(12, 0), pady=6)
         self._button(
             runtime,
@@ -890,15 +1118,10 @@ class SettingsWindow:
         self.update_check_enabled = tk.BooleanVar(
             value=bool(self.app.config.get("software_update_check_enabled", True))
         )
-        tk.Checkbutton(
+        self._checkbox(
             updates,
-            text=self.t("settings_check_whether_a_newer_version_has"),
-            variable=self.update_check_enabled,
-            font=self.font(9, "bold"),
-            fg=self.app.TEXT,
-            bg="white",
-            activebackground="white",
-            selectcolor="white",
+            self.t("settings_check_whether_a_newer_version_has"),
+            self.update_check_enabled,
         ).grid(row=0, column=1, sticky="w", padx=(12, 0), pady=6)
         for row, (label, value) in enumerate(self._update_summary(), start=1):
             tk.Label(
@@ -1025,19 +1248,26 @@ class SettingsWindow:
         }
 
     def _refresh_station_list(self, index=None):
-        self.station_list.delete(0, "end")
+        self.station_list.delete(*self.station_list.get_children())
         for number, station in enumerate(self.stations, 1):
             self.station_list.insert(
-                "end", f"{number:02}   {station['name'] or '(unnamed)'}"
+                "", "end", text=f"  {number:02}   {station['name'] or '(unnamed)'}"
             )
         if self.stations:
             index = max(
                 0, min(index if index is not None else 0, len(self.stations) - 1)
             )
-            self.station_list.selection_set(index)
-            self.station_list.activate(index)
+            item = self.station_list.get_children()[index]
             self.current_station = index
+            self.station_list.selection_set(item)
+            self.station_list.focus(item)
+            self.station_list.see(item)
             self._load_station(index)
+
+    def _selected_station(self):
+        items = self.station_list.get_children()
+        selected = [items.index(item) for item in self.station_list.selection() if item in items]
+        return selected[0] if selected else None
 
     def _load_station(self, index):
         station = self.stations[index]
@@ -1046,10 +1276,9 @@ class SettingsWindow:
             var.set(station["failures"][pos] if pos < len(station["failures"]) else "")
 
     def select_station(self, _event=None):
-        selection = self.station_list.curselection()
-        if not selection:
+        target = self._selected_station()
+        if target is None:
             return
-        target = int(selection[0])
         if self.current_station is not None and target != self.current_station:
             self._store_station()
         self.current_station = target
@@ -1096,6 +1325,11 @@ class SettingsWindow:
             for key, var in self.vars.items():
                 if not key.startswith("color_") and not key.startswith("integration_"):
                     candidate[key] = var.get().strip()
+            for key in DIRECTORY_NAME_KEYS:
+                if key in candidate:
+                    # Invisible differences in spacing would make a name that
+                    # looks right fail to match the directory.
+                    candidate[key] = " ".join(str(candidate[key]).split())
             if not candidate.get("line_name"):
                 raise ConfigurationError("Line / machine name cannot be empty")
             numeric_ranges = {
@@ -1173,6 +1407,7 @@ class SettingsWindow:
             elif colors != self.app.config.get("ui_colors"):
                 candidate["ui_color_preset"] = "custom"
             candidate["ui_colors"] = colors
+            validate_directory_names(candidate)
             validate_config(candidate)
             selected_connector = self.connector_selection.get().strip()
             if selected_connector:
@@ -1183,7 +1418,23 @@ class SettingsWindow:
             write_config(candidate)
             self._apply(candidate)
             self.win.destroy()
-            self.app.notify("All settings saved", "success", 6)
+            unknown = self._names_missing_from_directory(candidate)
+            if unknown:
+                self.app.logger.log(
+                    "settings_names_not_in_directory",
+                    "WARNING",
+                    names=unknown,
+                )
+                self.app.notify(
+                    f"Saved • {len(unknown)} name{'s' if len(unknown) != 1 else ''} not in directory",
+                    "info",
+                    10,
+                )
+            else:
+                self.app.notify("All settings saved", "success", 6)
+        except StateSaveError as exc:
+            # Configuration is written; only reconciling live selections failed.
+            self.error.set(f"Settings saved, but the line state could not be updated: {exc}")
         except ConfigurationError as exc:
             self.error.set(str(exc).replace("\n", "  "))
             self.tabs.select(
@@ -1191,6 +1442,20 @@ class SettingsWindow:
                 if "station" in str(exc).casefold() or "failure" in str(exc).casefold()
                 else self.tabs.index("current")
             )
+
+    def _names_missing_from_directory(self, candidate):
+        """Configured names the loaded directory does not contain (advisory only)."""
+        teams = {str(name).casefold() for name in self.directory.get("teams", []) or []}
+        chats = {
+            str(name).casefold() for name in self.directory.get("conversations", []) or []
+        }
+        missing = []
+        for key in DIRECTORY_NAME_KEYS:
+            name = str(candidate.get(key, "")).strip()
+            known = teams if key == "engineering_team_name" else chats
+            if name and known and name.casefold() not in known:
+                missing.append(name)
+        return missing
 
     def _apply(self, candidate):
         app = self.app
@@ -1222,6 +1487,8 @@ class SettingsWindow:
         )
         app.root.configure(bg=app.BG)
         app.canvas.configure(bg=app.BG)
+        if hasattr(app.canvas, "aa_backdrop"):
+            app.canvas.aa_backdrop = app.BG
         selected = [
             zone
             for zone in app.selected_zones()
@@ -1242,9 +1509,9 @@ class SettingsWindow:
             for zone, note in app.state.get("failure_notes", {}).items()
             if zone in cleaned and "Others" in cleaned[zone]
         }
-        app.save_state()
         app.logger = new_logger
         app.provider.logger = app.logger
+        app.save_state()
         app.logger.log(
             "settings_saved",
             administrator=app.authorized_admin_identity,

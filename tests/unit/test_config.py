@@ -9,6 +9,7 @@ from floorterminal.core.config import (
     DEFAULT_ZONES,
     ConfigurationError,
     validate_config,
+    validate_directory_names,
     write_json,
 )
 
@@ -24,6 +25,22 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("settings_password_hash", config)
         self.assertTrue(config["sound_enabled"])
         self.assertEqual(config["sound_volume"], 70)
+
+    def test_team_and_chat_names_are_free_text_on_one_line(self):
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config.update(
+            engineering_team_name="Maintenance — Night Shift",
+            engineering_chat_name="Line 4 / Engineering #2",
+        )
+        validate_directory_names(config)
+        for value in ("two\nlines", "x" * 121, 42):
+            broken = copy.deepcopy(DEFAULT_CONFIG)
+            broken["quality_chat_name"] = value
+            with self.subTest(value=value), self.assertRaises(ConfigurationError):
+                validate_directory_names(broken)
+            # Startup never refuses an existing installation over a name.
+            if isinstance(value, str):
+                validate_config(broken)
 
     def test_asset_tracking_requires_asset_id(self):
         config = copy.deepcopy(DEFAULT_CONFIG)
