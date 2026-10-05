@@ -26,7 +26,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff==0.16.9"]
+dev = ["ruff==0.16.10"]
 
 [project.scripts]
 floorterminal = "floorterminal.app:main"
