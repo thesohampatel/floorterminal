@@ -30,6 +30,9 @@ from ..storage.state import (
 SYNC_TICK_MS = 30_000
 RETRY_BASE_SECONDS = 60
 RETRY_MAX_SECONDS = 15 * 60
+# More than three times the bounded durable outbox; old completed entries must
+# not accumulate for months in the monotonic deadline cache.
+MAX_RETRY_DEADLINES = 512
 #: A lifecycle notification older than this is no longer operational news.
 LIFECYCLE_MESSAGE_TTL_SECONDS = 12 * 60 * 60
 #: A request for help that could not be sent promptly must not arrive much later.
@@ -122,7 +125,9 @@ class WorkflowMixin:
 
     def primary_action(self):
         if self.state.get("pending_planned_work"):
-            if self.provider.connected and self.provider.INFO.supports_response_records:
+            if getattr(self.provider, "deferred_writes", False) or (
+                self.provider.connected and self.provider.INFO.supports_response_records
+            ):
                 self.perform(
                     "Synchronizing planned work start…",
                     self.sync_pending_planned_work,
@@ -136,10 +141,19 @@ class WorkflowMixin:
             return
         status = self.state["status"]
         if status == "RUNNING":
+            if not self.has_zone_selection():
+                self.notify(
+                    "Touch an affected station or select the whole line first",
+                    "info",
+                    5,
+                )
+                return
             self.modal = {
                 "kind": "confirm_downtime",
-                "title": "CONFIRM LINE DOWNTIME",
-                "message": "Report the selected station(s) as stopped and alert Engineering?",
+                "title": "CONFIRM PRODUCTION IMPACT"
+                if self.config.get("station_groups")
+                else "CONFIRM LINE DOWNTIME",
+                "message": "Choose Engineering help, or operator self-fix for a minor stoppage you are trained and permitted to handle. Both record the same downtime information.",
             }
             self.logger.log("downtime_confirmation_requested")
         elif status == "DOWN":
@@ -174,6 +188,46 @@ class WorkflowMixin:
             self.confirm_done()
 
     def load_engineers(self, context):
+        if getattr(self.provider, "deferred_writes", False):
+            cached = self.delivery.cached_roster()
+            if cached:
+                members = [
+                    {**member, "id": str(member["id"])} for member in cached["members"]
+                ]
+                if context["kind"] == "edit":
+                    known = {member["id"] for member in members}
+                    for user_id, name in zip(
+                        self.state.get("engineer_ids", []),
+                        self.state.get("engineer_names", []),
+                    ):
+                        if str(user_id) not in known:
+                            members.append(
+                                {
+                                    "id": str(user_id),
+                                    "displayName": name,
+                                    "teamRole": "CURRENT",
+                                }
+                            )
+                if members:
+                    self.show_engineer_picker(
+                        {"members": members, "team_id": cached["team_id"], "context": context}
+                    )
+                    self.modal["cached_at"] = cached["saved_at"]
+                    return
+            self.modal = {
+                "kind": "offline_crew",
+                "context": context,
+                "message": (
+                    "The saved team list contains no selectable members. " if cached else
+                    "A verified team list is not cached for this connection. "
+                ) + "Refresh it, or continue without names and update the crew later. No participant will be invented.",
+            }
+            # First use bootstraps once. Empty, stale or failed lists never cause
+            # another API read merely because the operator reopens this screen.
+            if not cached and not self.delivery.roster_sync():
+                self.delivery.request_roster()
+            return
+
         def fetch():
             team_id = self.provider.resolve_name(
                 "team", self.config.get("engineering_team_name", "")
@@ -183,8 +237,7 @@ class WorkflowMixin:
             for member in members:
                 name = (
                     str(member.get("displayName", "")).strip()
-                    or
-                    f"{member.get('firstName', '')} {member.get('lastName', '')}"
+                    or f"{member.get('firstName', '')} {member.get('lastName', '')}"
                 ).strip() or f"User #{member['id']}"
                 normalized.append(
                     {**member, "id": str(member["id"]), "displayName": name}
@@ -219,6 +272,7 @@ class WorkflowMixin:
         members = sorted(
             result["members"],
             key=lambda member: (
+                str(member["id"]) not in selected,
                 -int(usage.get(str(member["id"]), 0)),
                 member["displayName"].casefold(),
             ),
@@ -232,6 +286,7 @@ class WorkflowMixin:
             "selected": selected,
             "page": 0,
             "filter": "",
+            "batch": False,
         }
         self.logger.log(
             "engineer_roster_displayed",
@@ -239,35 +294,75 @@ class WorkflowMixin:
             context=result["context"]["kind"],
         )
 
+    def choose_engineer(self, index):
+        """One explicit name tile starts work, joins, or leaves the current crew."""
+        member = self.modal["members"][index]
+        if not self.modal.get("batch"):
+            self.modal["selected"] = (
+                set(map(str, self.state.get("engineer_ids", [])))
+                if self.modal["context"]["kind"] == "edit"
+                else set()
+            )
+        selected = self.modal["selected"]
+        identifier = str(member["id"])
+        if identifier in selected:
+            selected.remove(identifier)
+        else:
+            selected.add(identifier)
+        if not self.modal.get("batch"):
+            self.confirm_engineers()
+
     def confirm_engineers(self):
         selected = self.modal["selected"]
-        if not selected:
+        context = dict(self.modal["context"])
+        if not selected and context["kind"] != "edit":
             self.notify("Select at least one engineer", "error")
             return
         members = self.modal.get("full_members", self.modal["members"])
-        chosen = [member for member in members if member["id"] in selected]
-        context = self.modal["context"]
+        chosen = [dict(member) for member in members if str(member["id"]) in selected]
         team_id = self.modal["team_id"]
-        usage = self.state.setdefault("engineer_usage", {})
-        for member in chosen:
-            key = str(member["id"])
-            usage[key] = int(usage.get(key, 0)) + 1
-        self.save_state()
-        self.modal = None
-        if context["kind"] == "repair":
-            self.perform("Starting repair…", lambda: self.start_repair(team_id, chosen))
-        elif context["kind"] == "edit":
-            self.perform(
-                "Updating Engineering crew…",
-                lambda: self.update_active_crew(team_id, chosen),
+
+        def save():
+            previous = (
+                set(map(str, self.state.get("engineer_ids", [])))
+                if context["kind"] == "edit"
+                else set()
             )
-        else:
-            self.perform(
-                f"Starting {context['work_label'].lower()}",
-                lambda: self.start_planned_work(
-                    context["work_label"], context["work_type"], team_id, chosen
-                ),
+            usage = self.state.setdefault("engineer_usage", {})
+            for member in chosen:
+                key = str(member["id"])
+                if key not in previous:
+                    usage[key] = int(usage.get(key, 0)) + 1
+            if context["kind"] == "repair":
+                return self.start_repair(team_id, chosen)
+            if context["kind"] == "edit":
+                return self.update_active_crew(team_id, chosen)
+            return self.start_planned_work(
+                context["work_label"], context["work_type"], team_id, chosen
             )
+
+        def saved(result):
+            self.modal = None
+            self.notify(result or "Crew saved on this terminal", "success", 5)
+
+        def failed(_error):
+            # Keep the picker, but restore its checkmarks to saved reality. A
+            # failed quick tap must not turn into the opposite action on retry.
+            if self.modal and self.modal.get("kind") == "engineers":
+                self.modal["selected"] = (
+                    set(map(str, self.state.get("engineer_ids", [])))
+                    if context["kind"] == "edit"
+                    else set()
+                )
+
+        self.perform(
+            "Updating Engineering crew"
+            if context["kind"] == "edit"
+            else "Starting Engineering work",
+            save,
+            saved,
+            on_error=failed,
+        )
 
     @staticmethod
     def participant_summary(members):
@@ -286,6 +381,13 @@ class WorkflowMixin:
         ]
 
     def _supports(self, name):
+        if (
+            getattr(self.provider, "deferred_writes", False)
+            and not self.provider.connected
+            and name
+            in {"supports_response_record_status", "supports_response_record_comments"}
+        ):
+            return True
         info = getattr(self.provider, "INFO", None)
         # Small injected test/provider doubles created before capability flags
         # existed retain legacy behavior when they implement the operation.
@@ -338,15 +440,26 @@ class WorkflowMixin:
         kind = failure_kind(exc)
         attempts = int(entry.get("attempts", 1))
         if kind == "rate_limited":
-            delay = max(5, int(getattr(exc, "retry_after", None) or RETRY_BASE_SECONDS) + 1)
+            delay = max(
+                5, int(getattr(exc, "retry_after", None) or RETRY_BASE_SECONDS) + 1
+            )
         else:
-            delay = min(RETRY_MAX_SECONDS, RETRY_BASE_SECONDS * 2 ** max(0, attempts - 1))
+            delay = min(
+                RETRY_MAX_SECONDS,
+                RETRY_BASE_SECONDS * 2 ** min(16, max(0, attempts - 1)),
+            )
         entry["retry_after_seconds"] = delay
         entry["last_error"] = _short_error(exc)
         give_up = kind == "permanent" and attempts >= PERMANENT_FAILURE_ATTEMPTS
         return kind, give_up, delay
 
     def _trim_queue(self, queue, limit, event):
+        if len(queue) > limit and getattr(self.provider, "deferred_writes", False):
+            error = StateSaveError(
+                "External update queue is full. Previously saved work is retained; restore synchronization before adding more."
+            )
+            self.state_store.fail_transaction(error)
+            raise error
         while len(queue) > limit:
             # Comments and notifications are dropped before lifecycle status,
             # which is what closes the response record.
@@ -368,6 +481,7 @@ class WorkflowMixin:
         state = self.state
         return sum(
             (
+                len(state.get("delivery_outbox") or []),
                 bool(state.get("pending_response_record")),
                 bool(state.get("pending_planned_work")),
                 bool(state.get("pending_response_status")),
@@ -396,7 +510,10 @@ class WorkflowMixin:
             queue[:] = [
                 item
                 for item in queue
-                if not (item.get("action") == "status" and item.get("record_id") == record_id)
+                if not (
+                    item.get("action") == "status"
+                    and item.get("record_id") == record_id
+                )
             ]
         entry = {
             **self._new_queue_entry(RECORD_UPDATE_TTL_SECONDS),
@@ -428,10 +545,14 @@ class WorkflowMixin:
         queue = self.state.get("pending_record_updates") or []
         if not queue:
             return True
-        if not getattr(self.provider, "connected", True):
+        if not getattr(self.provider, "connected", True) and not getattr(
+            self.provider, "deferred_writes", False
+        ):
             return False
         for entry in list(queue):
-            if self._queue_entry_expired(entry):
+            if self._queue_entry_expired(entry) and not getattr(
+                self.provider, "deferred_writes", False
+            ):
                 self._mark_completion_outcome(entry, "failed")
                 queue.remove(entry)
                 self.logger.log(
@@ -460,6 +581,8 @@ class WorkflowMixin:
                         entry["record_id"], entry["content"]
                     )
             except Exception as exc:
+                if getattr(self.provider, "deferred_writes", False):
+                    raise
                 kind, give_up, delay = self._schedule_retry(entry, exc)
                 self.logger.log(
                     "record_update_failed",
@@ -488,10 +611,17 @@ class WorkflowMixin:
                 if kind != "permanent":
                     break
                 continue
-            self._mark_completion_outcome(entry, "confirmed")
+            self._mark_completion_outcome(
+                entry,
+                "pending"
+                if getattr(self.provider, "deferred_writes", False)
+                else "confirmed",
+            )
             queue.remove(entry)
             self.logger.log(
-                "record_update_synchronized",
+                "record_update_journaled"
+                if getattr(self.provider, "deferred_writes", False)
+                else "record_update_synchronized",
                 record_id=entry["record_id"],
                 action=entry["action"],
                 target_status=entry.get("status"),
@@ -588,7 +718,9 @@ class WorkflowMixin:
             else:
                 # Absence from the queue can mean expiry, rejection or eviction;
                 # it is not evidence that the external system accepted DONE.
-                parts.append("Response record: DONE not confirmed — check external system")
+                parts.append(
+                    "Response record: DONE not confirmed — check external system"
+                )
         if self.asset_tracking_enabled():
             if self.state.get("asset_status_sync_pending"):
                 parts.append(
@@ -604,6 +736,14 @@ class WorkflowMixin:
 
     def render_queued_message(self, entry):
         content = entry["content"]
+        if (
+            getattr(self.provider, "deferred_writes", False)
+            and entry.get("status_record_id") is not None
+        ):
+            return (
+                content
+                + "\nProduction release recorded locally; external lifecycle updates were queued for synchronization."
+            )
         record_id = entry.get("status_record_id")
         if record_id is None:
             return content
@@ -630,7 +770,9 @@ class WorkflowMixin:
             queue, key=lambda item: (item.get("kind") != "support", item["created_at"])
         )
         for entry in ordered:
-            if self._queue_entry_expired(entry):
+            if self._queue_entry_expired(entry) and not getattr(
+                self.provider, "deferred_writes", False
+            ):
                 queue.remove(entry)
                 outcomes[entry["id"]] = "expired"
                 self.logger.log(
@@ -649,8 +791,17 @@ class WorkflowMixin:
             entry["last_attempt_at"] = time.time()
             self.save_state()
             try:
-                self.provider.send_message(entry["chat"], self.render_queued_message(entry))
+                if getattr(self.provider, "deferred_writes", False):
+                    self.provider.queue_message(
+                        entry, self.render_queued_message(entry)
+                    )
+                else:
+                    self.provider.send_message(
+                        entry["chat"], self.render_queued_message(entry)
+                    )
             except Exception as exc:
+                if getattr(self.provider, "deferred_writes", False):
+                    raise
                 kind, give_up, delay = self._schedule_retry(entry, exc)
                 if entry.get("kind") == "support" and kind == "permanent":
                     give_up = True
@@ -682,9 +833,13 @@ class WorkflowMixin:
                     break
                 continue
             queue.remove(entry)
-            outcomes[entry["id"]] = "sent"
+            outcomes[entry["id"]] = (
+                "queued" if getattr(self.provider, "deferred_writes", False) else "sent"
+            )
             self.logger.log(
-                "lifecycle_chat_sent",
+                "lifecycle_chat_journaled"
+                if getattr(self.provider, "deferred_writes", False)
+                else "lifecycle_chat_sent",
                 chat=entry["chat"],
                 message_type=entry["content"].split("\n", 1)[0],
                 attempt=entry["attempts"],
@@ -695,11 +850,14 @@ class WorkflowMixin:
 
     def sync_response_status(self, response_record_id, status):
         """Persist an idempotent lifecycle update before attempting the connector."""
-        if not response_record_id or not self._supports("supports_response_record_status"):
+        if not response_record_id or not self._supports(
+            "supports_response_record_status"
+        ):
             return True
         pending = self.state.get("pending_response_status")
         if not isinstance(pending, dict) or (
-            pending.get("record_id"), pending.get("status")
+            pending.get("record_id"),
+            pending.get("status"),
         ) != (response_record_id, status):
             pending = {
                 "record_id": response_record_id,
@@ -709,7 +867,9 @@ class WorkflowMixin:
             }
         self.state["pending_response_status"] = pending
         self.save_state()
-        if not getattr(self.provider, "connected", True):
+        if not getattr(self.provider, "connected", True) and not getattr(
+            self.provider, "deferred_writes", False
+        ):
             return False
         pending["attempts"] = int(pending.get("attempts", 0)) + 1
         pending["last_attempt_at"] = time.time()
@@ -756,7 +916,9 @@ class WorkflowMixin:
             }
         self.state["pending_participant_assignment"] = pending
         self.save_state()
-        if not getattr(self.provider, "connected", True):
+        if not getattr(self.provider, "connected", True) and not getattr(
+            self.provider, "deferred_writes", False
+        ):
             return False
         pending["attempts"] = int(pending.get("attempts", 0)) + 1
         pending["last_attempt_at"] = time.time()
@@ -851,7 +1013,10 @@ class WorkflowMixin:
             ", ".join(old_names.get(value, f"User #{value}") for value in removed)
             or "None"
         )
-        active_names = self.participant_summary(members)
+        active_names = (
+            self.participant_summary(members)
+            or "No active crew • production remains stopped"
+        )
         message = (
             f"👥 ENGINEERING CREW UPDATED\nAdded: {added_names}\nLeft active work: {removed_names}"
             f"\nCurrently active: {active_names}\nStations: {self.zone_summary()}\nReported failures: {self.failure_summary()}"
@@ -870,6 +1035,7 @@ class WorkflowMixin:
         response_record_id = self.state.get("response_record_id")
         if not response_record_id:
             raise RuntimeError("No active maintenance response record")
+        self.record_operator_handover()
         ids = [member["id"] for member in members]
         names = self.participant_summary(members) or "Not yet assigned"
         now = datetime.now().astimezone()
@@ -904,14 +1070,18 @@ class WorkflowMixin:
         )
         self.post_record_comment(
             response_record_id,
-            f"🔧 WORK STARTED\nEngineers: {names}\nAffected stations: {zone}\nReported failures: {failures}\nStarted: {now:%Y-%m-%d %H:%M:%S %Z}\nSource: {self._source_name()}",
+            f"🔧 WORK STARTED\nEngineers: {names}\nAffected stations: {zone}\nReported failures: {failures}\nStarted: {now:%Y-%m-%d %H:%M:%S %Z}\nSource: {self._source_name()}\n{self.operator_response_summary()}",
         )
         self.send_activity_chats(
             ["engineering_chat_name", "common_activity_chat_name"],
             f"🔧 REPAIR IN PROGRESS • {self.config['line_name']}\nResponse record: #{response_record_id}\nStations: {zone}\nReported failures: {failures}\nEngineers: {names}\nStarted: {now:%H:%M:%S %Z}",
         )
         self.play_sound("response")
-        suffix = "" if assignment_ok and status_ok and asset_ok else " • external sync pending"
+        suffix = (
+            ""
+            if assignment_ok and status_ok and asset_ok
+            else " • external sync pending"
+        )
         return f"Repair started by {names}{suffix}"
 
     def format_template(self, key, **values):
@@ -932,9 +1102,23 @@ class WorkflowMixin:
         }
         return str(self.config[key]).format(**{**defaults, **values})
 
-    def report_downtime(self):
+    def report_downtime(self, operator_name=None):
+        if self.state["status"] != "RUNNING":
+            raise RuntimeError(
+                "An incident is already active; continue the existing response"
+            )
         if not self.has_zone_selection():
             raise RuntimeError("Select the affected station or Entire Line first")
+        if operator_name is not None and (
+            self.state["status"] != "RUNNING"
+            or not isinstance(operator_name, str)
+            or len(operator_name) > 120
+            or any(ord(c) < 32 for c in operator_name)
+        ):
+            raise RuntimeError(
+                "Operator self-fix needs a running line and a valid optional name"
+            )
+        self_fix = operator_name is not None
         now = datetime.now().astimezone()
         line = self.config["line_name"]
         title = self.format_template(
@@ -952,22 +1136,35 @@ class WorkflowMixin:
         )
         failures = self.failure_summary()
         report_id = str(uuid.uuid4())
+        started = time.time()
+        impact_description = self.begin_incident(report_id)
+        if self_fix:
+            title = f"Operator self-fix • {line} • {self.zone_summary()}"
+            desc += f"\nResponse category: Operator self-fix\nOperator: {operator_name.strip() or 'Name not recorded'}\nMinor stoppage being handled by the operator; Engineering has not been requested."
         desc += (
             f"\nStations selected on terminal: {self.zone_summary()}."
             f"\nReported failure types: {failures}."
-            f"\nTerminal report ID: {report_id}. This is the remotely enforced idempotency key for synchronization."
+            f"\nTerminal report ID: {report_id}. Delivery safety is governed by the configured connector policy."
         )
         self.state.update(
-            status="DOWN",
+            status="REPAIRING" if self_fix else "DOWN",
+            operator_response={
+                "name": operator_name.strip(),
+                "started_at": started,
+                "requested_at": None,
+                "handed_over_at": None,
+            }
+            if self_fix
+            else None,
             response_record_id=None,
-            started_at=time.time(),
-            repair_at=None,
+            started_at=started,
+            repair_at=started if self_fix else None,
             work_label=None,
             work_type=None,
             completion_confirmed_at=None,
             pending_response_record={
                 "title": title,
-                "description": desc,
+                "description": desc + "\n" + impact_description,
                 "priority": self.config.get("response_record_priority", "HIGH"),
                 "created_at": time.time(),
                 "report_id": report_id,
@@ -991,7 +1188,10 @@ class WorkflowMixin:
             report_id=report_id,
         )
         self.play_sound("alert")
-        if not self.provider.connected or not self.provider.INFO.supports_response_records:
+        if not getattr(self.provider, "deferred_writes", False) and (
+            not self.provider.connected
+            or not self.provider.INFO.supports_response_records
+        ):
             return "Downtime recorded locally • synchronization pending"
         try:
             return self.sync_pending_downtime()
@@ -1005,15 +1205,20 @@ class WorkflowMixin:
         pending = self.state.get("pending_response_record")
         if not pending:
             raise RuntimeError("No locally queued downtime report")
-        if not self.provider.connected:
+        if not self.provider.connected and not getattr(
+            self.provider, "deferred_writes", False
+        ):
             raise RuntimeError("Connector is unavailable")
-        if not self.provider.INFO.supports_response_records:
+        if not self.provider.INFO.supports_response_records and not getattr(
+            self.provider, "deferred_writes", False
+        ):
             raise RuntimeError("Connector does not provide response-record creation")
         team_id = (
             self.provider.resolve_name(
                 "team", self.config.get("engineering_team_name", "")
             )
             if self.provider.INFO.supports_team_directory
+            and not self.operator_resolving()
             else None
         )
         pending["sync_attempts"] = int(pending.get("sync_attempts", 0)) + 1
@@ -1060,17 +1265,24 @@ class WorkflowMixin:
             "OFFLINE",
             "UNPLANNED",
             self.asset_status_note(
-                f"Unplanned downtime • {line}",
+                f"{'Operator self-fix' if self.operator_resolving() else 'Unplanned downtime'} • {line}",
                 zones,
                 pending.get("reasons_summary") or failures,
                 pending.get("notes_summary", ""),
                 number,
             ),
         )
-        self.send_activity_chats(
-            ["engineering_chat_name", "common_activity_chat_name"],
-            f"🚨 UNPLANNED DOWNTIME CREATED • {line}\nResponse record: #{number}\nStations: {zones}\nReported failures: {failures}\nStatus: OPEN\nEngineering response requested.",
-        )
+        if self.operator_resolving():
+            self.sync_response_status(result["id"], "IN_PROGRESS")
+            self.send_activity_chats(
+                ["production_chat_name", "common_activity_chat_name"],
+                f"OPERATOR SELF-FIX STARTED • {line}\nResponse record: #{number}\nStations: {zones}\nReported failures: {failures}\n{self.operator_response_summary()}\nEngineering has not been requested.",
+            )
+        else:
+            self.send_activity_chats(
+                ["engineering_chat_name", "common_activity_chat_name"],
+                f"🚨 UNPLANNED DOWNTIME CREATED • {line}\nResponse record: #{number}\nStations: {zones}\nReported failures: {failures}\nStatus: OPEN\nEngineering response requested.",
+            )
         self.log_event(f"Downtime synchronized • RECORD #{number}", self.RED)
         self.save_state()
         self.logger.log(
@@ -1080,9 +1292,13 @@ class WorkflowMixin:
             report_id=pending.get("report_id"),
         )
         suffix = "" if asset_ok else " • asset sync pending"
+        if self.config.get("reporting_mode") == "local":
+            return "Incident recorded on this terminal • standalone mode"
         return f"Response record #{number} created • recorded downtime synchronized{suffix}"
 
     def _record_creation_supported(self):
+        if getattr(self.provider, "deferred_writes", False):
+            return True
         info = getattr(self.provider, "INFO", None)
         return bool(getattr(info, "supports_response_records", False))
 
@@ -1175,7 +1391,10 @@ class WorkflowMixin:
     def sync_pending_tick(self):
         try:
             if (
-                getattr(self.provider, "connected", False)
+                (
+                    getattr(self.provider, "connected", False)
+                    or getattr(self.provider, "deferred_writes", False)
+                )
                 and not self.busy
                 and self.sync_work_due()
             ):
@@ -1195,11 +1414,13 @@ class WorkflowMixin:
         except (TypeError, ValueError):
             return True
         marker = (occurred_at, interval_seconds)
-        cached = self.retry_deadlines.get(key)
+        cached = self.retry_deadlines.pop(key, None)
         if not cached or cached[0] != marker:
             elapsed = min(interval_seconds, max(0.0, time.time() - occurred_at))
             cached = (marker, time.monotonic() + interval_seconds - elapsed)
-            self.retry_deadlines[key] = cached
+        self.retry_deadlines[key] = cached
+        while len(self.retry_deadlines) > MAX_RETRY_DEADLINES:
+            del self.retry_deadlines[next(iter(self.retry_deadlines))]
         return time.monotonic() >= cached[1]
 
     def pending_retry_due(self, pending, interval_seconds=60):
@@ -1212,8 +1433,38 @@ class WorkflowMixin:
 
     def escalation_tick(self):
         try:
+            from ..storage.incidents import all_incidents
+
+            if self.state.get("parked_incidents") and not self.busy:
+                threshold = int(self.config.get("escalation_minutes", 0)) * 60
+                due = []
+                for incident in all_incidents(self.state):
+                    started = (incident.get("operator_response") or {}).get(
+                        "requested_at"
+                    ) or incident.get("started_at")
+                    if (
+                        threshold
+                        and incident["status"] == "DOWN"
+                        and started
+                        and not incident.get("escalated_at")
+                        and self.deadline_due(
+                            "escalation:" + incident["incident_id"], started, threshold
+                        )
+                    ):
+                        due.append(incident["incident_id"])
+                if due:
+
+                    def escalate():
+                        for identifier in due[:8]:
+                            self.escalate_group(identifier)
+                        return "Overdue group responses escalated"
+
+                    self.perform("Escalating unattended groups", escalate, quiet=True)
+                return
             threshold = int(self.config.get("escalation_minutes", 0)) * 60
-            started = self.state.get("started_at")
+            started = (self.state.get("operator_response") or {}).get(
+                "requested_at"
+            ) or self.state.get("started_at")
             if (
                 threshold
                 and self.state.get("status") == "DOWN"
@@ -1223,7 +1474,9 @@ class WorkflowMixin:
                 and not self.busy
             ):
                 self.perform(
-                    "Escalating unattended downtime…", self.escalate_downtime, quiet=True
+                    "Escalating unattended downtime…",
+                    self.escalate_downtime,
+                    quiet=True,
                 )
         finally:
             self.root.after(30_000, self.escalation_tick)
@@ -1254,6 +1507,8 @@ class WorkflowMixin:
         return "Downtime escalated • supervisor response requested"
 
     def change_status(self, api_status, local_status):
+        if local_status == "REPAIRING" and self.operator_resolving():
+            return self.start_repair(None, [])
         response_record_id = self.state.get("response_record_id")
         if not response_record_id:
             raise RuntimeError("No active maintenance response record")
@@ -1284,12 +1539,20 @@ class WorkflowMixin:
                 else "Confirm the repair is complete, guards are in place, and the line is safe to operate."
             ),
         }
+        scope = self.state.get("incident_scope")
+        if scope and scope["impact"] == "group":
+            from ..core.topology import scope_text
+
+            self.modal["title"] = "Resume these groups?"
+            self.modal["message"] = (
+                "Confirm work is complete and the affected stations are safe to operate. "
+                "Other open group responses will remain stopped.\n" + scope_text(scope)
+            )
         earlier = self.state.get("completion_confirmed_at")
         if isinstance(earlier, (int, float)) and not isinstance(earlier, bool):
             stamp = datetime.fromtimestamp(earlier).astimezone().strftime("%H:%M:%S")
             self.modal["note"] = (
-                f"An earlier release at {stamp} was not saved • "
-                f"confirming records Production restored at {stamp}"
+                f"Release was not saved. Retry records the original time: {stamp}."
             )
 
     def open_planned_work(self):
@@ -1307,6 +1570,10 @@ class WorkflowMixin:
         self.logger.log("planned_work_menu_opened")
 
     def start_planned_work(self, work_label, work_type, team_id, members):
+        if self.state["status"] != "RUNNING":
+            raise RuntimeError(
+                "Continue the current response before planning another stop"
+            )
         if not self.has_zone_selection():
             raise RuntimeError("Select the planned-work station or Entire Line first")
         if self.state.get("pending_planned_work"):
@@ -1329,7 +1596,7 @@ class WorkflowMixin:
             f"\nSelected line stations: {self.zone_summary()}."
             f"\nReported failure types: {self.failure_summary()}."
             f"\nEngineering participants: {names}."
-            f"\nTerminal report ID: {report_id}. This is the remotely enforced idempotency key for synchronization."
+            f"\nTerminal report ID: {report_id}. Delivery safety is governed by the configured connector policy."
         )
         # Persisted before the network call so an ambiguous timeout can be
         # retried with this exact idempotency key instead of minting a new
@@ -1343,7 +1610,7 @@ class WorkflowMixin:
                 for member in members
             ],
             "title": title,
-            "description": description,
+            "description": description + "\n" + self.begin_incident(report_id),
             "priority": self.config.get("planned_work_priority", "MEDIUM"),
             "report_id": report_id,
             "created_at": time.time(),
@@ -1359,7 +1626,10 @@ class WorkflowMixin:
             "planned_work_recorded_locally", work_label=work_label, report_id=report_id
         )
         self.play_sound("planned")
-        if not self.provider.connected or not self.provider.INFO.supports_response_records:
+        if not getattr(self.provider, "deferred_writes", False) and (
+            not self.provider.connected
+            or not self.provider.INFO.supports_response_records
+        ):
             return "Planned work recorded locally • synchronization pending"
         return self.sync_pending_planned_work()
 
@@ -1367,9 +1637,13 @@ class WorkflowMixin:
         pending = self.state.get("pending_planned_work")
         if not pending:
             raise RuntimeError("No locally queued planned work to synchronize")
-        if not self.provider.connected:
+        if not self.provider.connected and not getattr(
+            self.provider, "deferred_writes", False
+        ):
             raise RuntimeError("Connector is unavailable")
-        if not self.provider.INFO.supports_response_records:
+        if not self.provider.INFO.supports_response_records and not getattr(
+            self.provider, "deferred_writes", False
+        ):
             raise RuntimeError("Connector does not provide response-record creation")
         pending["sync_attempts"] = int(pending.get("sync_attempts", 0)) + 1
         pending["last_attempt_at"] = time.time()
@@ -1409,7 +1683,7 @@ class WorkflowMixin:
         self.state.update(
             status="ENGINEERING",
             response_record_id=result["id"],
-            started_at=time.time(),
+            started_at=pending["created_at"],
             repair_at=None,
             work_label=pending["work_label"],
             work_type=pending["work_type"],
@@ -1456,11 +1730,26 @@ class WorkflowMixin:
             f"🛠️ PLANNED • {pending['work_label'].upper()} STARTED • {line}\nResponse record: #{result.get('reference', result['id'])}\nStations: {zones}\nReported failures: {failures}\nEngineers: {names}",
         )
         suffix = "" if status_ok and asset_ok else " • external sync pending"
+        if self.config.get("reporting_mode") == "local":
+            return (
+                f"{pending['work_label']} recorded on this terminal • standalone mode"
+            )
         return f"{pending['work_label']} started • RECORD #{result.get('reference', result['id'])}{suffix}"
 
     def _source_name(self):
         profile = getattr(self, "project_profile", None)
         return getattr(profile, "product_name", "") or "FloorTerminal"
+
+    def capture_release_confirmation(self, confirmed_at):
+        """Save the affirmative touch before the atomic release transaction."""
+        earlier = self.state.get("completion_confirmed_at")
+        if (
+            not isinstance(earlier, (int, float))
+            or isinstance(earlier, bool)
+            or not 0 < earlier <= confirmed_at
+        ):
+            self.state["completion_confirmed_at"] = confirmed_at
+            self.save_state()
 
     def finish_work(self, confirmed_at=None):
         """Release the line to Production as one atomic, durable transition.
@@ -1533,26 +1822,64 @@ class WorkflowMixin:
             if self.state.get("status") == "ENGINEERING"
             else None
         )
+        partial = (self.state.get("incident_scope") or {}).get("impact") == "group"
+        time_label = "Affected-group time" if partial else "Total line time"
+        release_label = (
+            "GROUPS RELEASED TO PRODUCTION"
+            if partial
+            else "LINE RELEASED TO PRODUCTION"
+        )
         completion_comment = (
             f"✅ WORK COMPLETED • {event_class}\nAll engineers involved: {names}\nCrew active at completion: {active_names}"
             f"\nParticipation history:\n{timeline_text}\nLine stations: {zone}\nReported failures: {failures}"
-            f"\nCompleted: {now:%Y-%m-%d %H:%M:%S %Z}\nTotal line time: {self.format_duration(total)}"
+            f"\nCompleted: {now:%Y-%m-%d %H:%M:%S %Z}\n{time_label}: {self.format_duration(total)}"
             f"\nActive work time: {self.format_duration(repair)}\nProduction release confirmed on {self._source_name()}."
         )
         completion_message = (
-            f"✅ LINE RELEASED TO PRODUCTION • {event_class} • {line}\nResponse record: #{response_record_id}"
+            f"✅ {release_label} • {event_class} • {line}\nResponse record: #{response_record_id}"
             + (f"\nWork: {planned_label}" if planned_label else "")
             + f"\nStations: {zone}\nReported failures: {failures}\nEngineers involved: {names}\nCrew at completion: {active_names}"
-            f"\nTotal line time: {self.format_duration(total)}"
+            f"\n{time_label}: {self.format_duration(total)}"
         )
+        operator_summary = self.operator_response_summary(released_at)
+        operator_only = self.operator_resolving()
+        operator_requested = bool(
+            (self.state.get("operator_response") or {}).get("requested_at")
+        )
+        if operator_summary:
+            completion_comment += "\n" + operator_summary
+            completion_message += "\n" + operator_summary
+            if operator_only:
+                completion_comment = completion_comment.replace(
+                    f"All engineers involved: {names}\nCrew active at completion: {active_names}",
+                    "Resolved by the operator • no Engineering repair",
+                )
+                completion_comment = completion_comment.replace(
+                    f"\nParticipation history:\n{timeline_text}", ""
+                )
+                completion_message = completion_message.replace(
+                    f"Engineers involved: {names}\nCrew at completion: {active_names}",
+                    "Resolved by the operator • no Engineering repair",
+                )
+                if operator_requested:
+                    completion_message += "\nThe Engineering help request is no longer needed; operator confirmed production restored."
 
         # --- one atomic transition -----------------------------------------
+        from ..core.topology import scope_text
+        from ..storage.history import stage
+
+        self.migrate_active_scope()
+        impact_description = scope_text(self.state.get("incident_scope"))
+        completion_comment += "\n" + impact_description
+        completion_message += "\n" + impact_description
+        stage(self.state, released_at, classification=event_class)
         # The physical release is authoritative. It is persisted together with
         # every follow-up so neither can exist on disk without the other.
         self.state["status"] = "RUNNING"
         self.log_event(f"Production resumed • {event_class}", self.GREEN)
         self.state.update(
             response_record_id=None,
+            operator_response=None,
             started_at=None,
             repair_at=None,
             work_label=None,
@@ -1570,8 +1897,12 @@ class WorkflowMixin:
         if isinstance(slot, dict) and slot.get("record_id") == response_record_id:
             # Completion supersedes an unsent In Progress update for this record.
             self.state["pending_response_status"] = None
-        self.queue_record_update(response_record_id, "comment", content=completion_comment)
-        status_queued = self.queue_record_update(response_record_id, "status", status="DONE")
+        self.queue_record_update(
+            response_record_id, "comment", content=completion_comment
+        )
+        status_queued = self.queue_record_update(
+            response_record_id, "status", status="DONE"
+        )
         asset_queued = self.queue_asset_status(
             "ONLINE",
             description=self.asset_status_note(
@@ -1580,18 +1911,36 @@ class WorkflowMixin:
                 planned_label or reasons,
                 operator_notes,
                 response_record_id,
-                (f"Total line time: {self.format_duration(total)}",),
+                (f"{time_label}: {self.format_duration(total)}",),
             ),
+            occurred_at=released_at,
         )
         self.queue_activity_chats(
-            ["engineering_chat_name", "production_chat_name", "common_activity_chat_name"],
+            (
+                ["production_chat_name", "common_activity_chat_name"]
+                if operator_only and not operator_requested
+                else [
+                    "engineering_chat_name",
+                    "production_chat_name",
+                    "common_activity_chat_name",
+                ]
+            ),
             completion_message,
-            status_record_id=response_record_id if (status_queued or asset_queued) else None,
+            status_record_id=response_record_id
+            if (status_queued or asset_queued)
+            else None,
         )
         self.save_state()
         self.logger.log(
             "downtime_classified",
             classification=event_class,
+            response_category=(
+                "operator_self_fix"
+                if operator_only
+                else "operator_then_engineering"
+                if operator_summary
+                else "engineering"
+            ),
             total_seconds=total,
             threshold_seconds=threshold,
             stations=selected_stations,
@@ -1610,15 +1959,22 @@ class WorkflowMixin:
         asset_ok = self.attempt_asset_status() if asset_queued else True
         updates_ok = self.flush_record_updates()
         self.flush_messages()
+        if not self.state.get("asset_status_sync_pending"):
+            self.state.update(incident_id=None, incident_scope=None)
+            self.save_state()
         suffix = "" if asset_ok and updates_ok else " • external sync queued"
-        return f"Work completed by {names} • Production resumed{suffix}"
+        responder = "operator" if operator_only else names
+        resumed = "Selected groups resumed" if partial else "Production resumed"
+        return f"Work completed by {responder} • {resumed}{suffix}"
 
-    def queue_asset_status(self, status, downtime_type=None, description=""):
+    def queue_asset_status(
+        self, status, downtime_type=None, description="", *, occurred_at=None
+    ):
         """Record the desired asset state durably without network use.
 
         Returns False when asset tracking is off or the asset is already in the
         requested state. An unchanged pending target keeps its idempotency key and
-        original context so a retry after an ambiguous timeout cannot duplicate it.
+        original context. Connector policy controls whether a retry is safe.
         """
         if not self.asset_tracking_enabled():
             return False
@@ -1636,11 +1992,15 @@ class WorkflowMixin:
             self.state["asset_status_sync_key"] = str(uuid.uuid4())
             self.state["asset_status_sync_attempts"] = 0
         if context is None:
+            event_time = occurred_at
+            if event_time is None and target == "OFFLINE":
+                event_time = self.state.get("started_at")
+            event_time = time.time() if event_time is None else event_time
             context = {
                 "status": target,
                 "downtime_type": downtime_type,
                 "description": str(description or ""),
-                "started_at": datetime.now(UTC)
+                "started_at": datetime.fromtimestamp(event_time, UTC)
                 .isoformat(timespec="milliseconds")
                 .replace("+00:00", "Z"),
                 "last_attempt_at": None,
@@ -1696,7 +2056,7 @@ class WorkflowMixin:
             raise RuntimeError(
                 f"{display_name} asset could not be set {target}; workflow is saved and can be retried: {exc}"
             ) from exc
-        record = result.get("assetStatus", result) if isinstance(result, dict) else {}
+        record = result if isinstance(result, dict) else {}
         status_id = record.get("id") if isinstance(record, dict) else None
         self.state.update(
             asset_status=target,
@@ -1711,7 +2071,9 @@ class WorkflowMixin:
             self.state["asset_offline_status_id"] = status_id
         self.save_state()
         self.logger.log(
-            "asset_status_synchronized",
+            "asset_status_journaled"
+            if getattr(self.provider, "deferred_writes", False)
+            else "asset_status_synchronized",
             asset_id=self.config.get("asset_id"),
             asset_status=target,
             downtime_type=context.get("downtime_type"),
@@ -1774,6 +2136,17 @@ class WorkflowMixin:
             )
             if self.failure_summary(""):
                 message += f" Reported failures: {self.failure_summary('')}."
+            if self.config.get("station_groups"):
+                selected = set(self.selected_zones())
+                groups = [
+                    g["name"]
+                    for g in self.station_groups()
+                    if "ENTIRE LINE" in selected or selected.intersection(g["stations"])
+                ]
+                message += "\nRequested groups: " + (
+                    ", ".join(groups) or "No specific group selected"
+                )
+                message += "\nSupport request only • no production status changed."
             entry = self.queue_message(
                 chat_name,
                 message,
@@ -1806,9 +2179,8 @@ class WorkflowMixin:
                 retry_in_seconds=wait,
                 error=entry.get("last_error", ""),
             )
-            return (
-                f"{name} call queued • sending automatically"
-                + (f" in {wait} s" if wait else "")
+            return f"{name} call queued • sending automatically" + (
+                f" in {wait} s" if wait else ""
             )
 
         self.perform(f"Calling {name}…", action)

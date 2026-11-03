@@ -59,6 +59,15 @@ access. The application shows an administrator-access error; local operator
 reporting remains available. An interrupted/failed atomic write leaves the old
 credential intact. A concurrently changed credential requires fresh authorization.
 
+Both the verifier and `auth_throttle.json` have a 4 KiB input ceiling and strict
+JSON validation. Duplicate fields, non-finite numbers, nonregular files and hard
+links are rejected before changing permissions. An invalid throttle file imposes
+a conservative 60-second delay without preventing ordinary operator reporting.
+Unsafe paths are not automatically overwritten. If a throttle update cannot be
+saved, administrator authorization fails rather than silently dropping protection.
+A trusted OS administrator should investigate the path/permissions; do not delete
+security files merely to bypass an error.
+
 ## Forgotten password / recovery
 
 There is no email reset, secret backdoor or default-password bypass. A trusted

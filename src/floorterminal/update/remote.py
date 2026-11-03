@@ -118,6 +118,7 @@ def _fetch(url, maximum, timeout=None):
                 raise ChannelError("Update channel response exceeds the safety limit")
             body = response.read(maximum + 1)
     except HTTPError as exc:
+        exc.close()
         raise ChannelError(_http_detail(exc.code)) from exc
     except URLError as exc:
         raise ChannelError(f"Update channel is unreachable: {exc.reason}") from exc

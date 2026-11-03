@@ -26,6 +26,33 @@ class CatalogEntry:
 
 CATALOG = (
     CatalogEntry(
+        version="1.2.0",
+        released_utc="",
+        title="Development preview — not released",
+        summary=(
+            "Configurable request budgets, bounded retained rendering, immediate "
+            "touch feedback, adaptive layouts and durable background delivery. "
+            "No release is published yet."
+        ),
+        features=(
+            "Configurable rolling-minute application request budget",
+            "Local-first incident and planned Engineering workflows",
+            "Atomic line release with durable, retried follow-ups",
+            "Independent background delivery and restart recovery",
+            "Protected review of uncertain external writes",
+            "Cached crew directory with explicit offline choices",
+            "Retained canvas rendering with bounded image caching",
+            "Single animation timer with hidden-screen backoff",
+            "Touch acknowledgment and persistent operation feedback",
+            "Rounded Settings pages within the application window",
+            "Portrait/landscape reflow and touch-sized station pages",
+            "Bounded dialogs and Settings that preserve unsaved edits",
+            "Per-station failures and editable responder assignments",
+            "Connector v1 mappings and independent capabilities",
+            "Signed offline USB updates with one-touch rollback",
+        ),
+    ),
+    CatalogEntry(
         version="1.1.0",
         released_utc="2026-09-29T00:00:00Z",
         title="Reliable completion and sharper touchscreen",

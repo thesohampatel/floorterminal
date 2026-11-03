@@ -36,6 +36,20 @@ if os.environ.get("COVERAGE_PROCESS_START"):  # pragma: no cover - measurement o
 
 ROOT = Path(__file__).resolve().parents[2]
 
+
+def capture_window(root, target):
+    """Capture only this test window, including on native Pi Wayland sessions."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.docs.screen_capture import capture_widget
+
+    # Let the compositor present the frame before asking for native pixels.
+    for _ in range(4):
+        root.update()
+        time.sleep(0.025)
+    capture_widget(root).save(target)
+
+
 # Controls that open a modal window, replace the process, or end the session are
 # driven by their own tests rather than by the sweep.
 EXCLUDED_CONTROLS = frozenset(
@@ -72,8 +86,18 @@ def dialogs():
     """Every dialog the operator can reach, in the shape the controller builds."""
     return [
         None,
+        {"kind": "__busy__"},
         {"kind": "about"},
+        {"kind": "delivery", "item": 0},
+        {"kind": "operator_setup", "name": "Operator A"},
+        {"kind": "operator_options"},
+        {
+            "kind": "offline_crew",
+            "context": {"kind": "repair"},
+            "message": "No cached team list. Refresh or continue without names.",
+        },
         {"kind": "update", "page": "status"},
+        {"kind": "update", "page": "status", "busy": True},
         {"kind": "update", "page": "version"},
         {"kind": "update", "page": "changes"},
         {"kind": "update", "page": "activity"},
@@ -118,13 +142,20 @@ def dialogs():
         },
         *[
             {
-                "kind": "password", "purpose": "password_change", "stage": stage,
-                "title": "CHANGE SETTINGS PASSWORD", "prompt": prompt,
-                "value": "", "shift": True,
+                "kind": "password",
+                "purpose": "password_change",
+                "stage": stage,
+                "title": "CHANGE SETTINGS PASSWORD",
+                "prompt": prompt,
+                "value": "",
+                "shift": True,
             }
             for stage, prompt in (
                 ("password", "Step 1 of 3 • Enter the current password"),
-                ("new_password", "Step 2 of 3 • New password: 8–128 characters, no spaces"),
+                (
+                    "new_password",
+                    "Step 2 of 3 • New password: 8–128 characters, no spaces",
+                ),
                 ("confirm_password", "Step 3 of 3 • Enter the new password again"),
             )
         ],
@@ -142,6 +173,7 @@ def dialogs():
         },
         {
             "kind": "engineers",
+            "team_id": "fixture-team",
             "members": [
                 {"id": "1", "displayName": "A. Engineer"},
                 {"id": "2", "displayName": "B. Engineer"},
@@ -170,7 +202,7 @@ def _logical(canvas, item):
 
 
 def copy_dialog(dialog):
-    if dialog is None or dialog.get("kind") == ERROR_PANEL:
+    if dialog is None or dialog.get("kind") in {ERROR_PANEL, "__busy__"}:
         return None
     copied = dict(dialog)
     if "selected" in copied:
@@ -246,11 +278,19 @@ def main():
         app.state["started_at"] = time.time() - 300
         app.state["repair_at"] = time.time() - 60 if state == "REPAIRING" else None
         app.state["engineer_names"] = ["A. Engineer"] if state == "REPAIRING" else []
-        app.state["work_label"] = "Preventive Maintenance" if state == "ENGINEERING" else None
-        app.busy = False
+        app.state["work_label"] = (
+            "Preventive Maintenance" if state == "ENGINEERING" else None
+        )
+        app.busy = bool(
+            dialog and (dialog.get("kind") == "__busy__" or dialog.get("busy"))
+        )
+        app.busy_message = "Synchronizing queued updates…" if app.busy else ""
+        app.busy_started = time.monotonic() - 120
         app.modal = copy_dialog(dialog)
         app.error_panel = (
-            dict(SAMPLE_ERROR_PANEL) if dialog and dialog.get("kind") == ERROR_PANEL else None
+            dict(SAMPLE_ERROR_PANEL)
+            if dialog and dialog.get("kind") == ERROR_PANEL
+            else None
         )
 
     rendered = 0
@@ -347,12 +387,21 @@ def main():
         if app.modal is not None or window.state() == "withdrawn":
             raise AssertionError("Cancel did not restore Settings")
         settings.change_password()
-        for password in ("ui-smoke-driver-secret", "TouchPassword@42", "TouchPassword@42"):
+        for password in (
+            "ui-smoke-driver-secret",
+            "TouchPassword@42",
+            "TouchPassword@42",
+        ):
             for character in password:
-                app.on_keypress(type("Event", (), {"keysym": character, "char": character})())
+                app.on_keypress(
+                    type("Event", (), {"keysym": character, "char": character})()
+                )
             app.render()
-            visible_text = [app.canvas.itemcget(item, "text") for item in app.canvas.find_all()
-                            if app.canvas.type(item) == "text"]
+            visible_text = [
+                app.canvas.itemcget(item, "text")
+                for item in app.canvas.find_all()
+                if app.canvas.type(item) == "text"
+            ]
             if any(password in text for text in visible_text):
                 raise AssertionError("A password was drawn without masking")
             app.on_keypress(type("Event", (), {"keysym": "Return", "char": ""})())
@@ -437,14 +486,24 @@ def main():
         app.modal = None
         app.config["engineering_chat_name"] = "Existing Chat"
         settings = app.open_settings(
-            {"teams": ["Maintenance"], "conversations": ["Existing Chat", "Engineering Chat"]}
+            {
+                "teams": ["Maintenance"],
+                "conversations": ["Existing Chat", "Engineering Chat"],
+            }
         )
         settle()
         states = {}
-        for key in ("engineering_team_name", "engineering_chat_name", "quality_chat_name"):
+        for key in (
+            "engineering_team_name",
+            "engineering_chat_name",
+            "quality_chat_name",
+        ):
             variable = str(settings.vars[key])
             for widget in descendants(settings.win):
-                if isinstance(widget, ttk.Combobox) and str(widget.cget("textvariable")) == variable:
+                if (
+                    isinstance(widget, ttk.Combobox)
+                    and str(widget.cget("textvariable")) == variable
+                ):
                     states[key] = str(widget.cget("state"))
         settings.vars["engineering_chat_name"].set("  Brand   New Chat ")
         settings.vars["quality_chat_name"].set("Quality Crew")
@@ -457,7 +516,10 @@ def main():
             and app.config["quality_chat_name"] == "Quality Crew"
         )
         if not directory_names_editable:
-            record("settings directory names", f"states={states} config={app.config.get('engineering_chat_name')!r}")
+            record(
+                "settings directory names",
+                f"states={states} config={app.config.get('engineering_chat_name')!r}",
+            )
     except Exception:
         record("settings directory names", traceback.format_exc(limit=4))
 
@@ -480,15 +542,22 @@ def main():
                 if not isinstance(widget, tk.Button):
                     continue
                 label = widget.cget("text")
-                if label in {"SAVE", "CANCEL", "+ ADD", "MOVE DOWN"} and widget.winfo_ismapped():
+                if (
+                    label in {"SAVE", "CANCEL", "+ ADD", "MOVE DOWN"}
+                    and widget.winfo_ismapped()
+                ):
                     inside = widget.winfo_rooty() + widget.winfo_height() <= bottom + 1
                     checked[(index, label)] = inside and widget.winfo_height() > 10
         window.destroy()
         expected_footer = all(
-            checked.get((index, label)) for index in range(6) for label in ("SAVE", "CANCEL")
+            checked.get((index, label))
+            for index in range(6)
+            for label in ("SAVE", "CANCEL")
         )
-        actions_visible_on_7_inch = expected_footer and checked.get((2, "+ ADD")) and checked.get(
-            (2, "MOVE DOWN")
+        actions_visible_on_7_inch = (
+            expected_footer
+            and checked.get((2, "+ ADD"))
+            and checked.get((2, "MOVE DOWN"))
         )
         if not actions_visible_on_7_inch:
             record("settings 7-inch", f"controls not fully visible: {checked}")
@@ -497,6 +566,85 @@ def main():
     finally:
         del root.winfo_screenwidth
         del root.winfo_screenheight
+
+    v12_settings_verified = False
+    try:
+        app.modal = None
+        app.busy = False
+        settings = app.open_settings()
+        if app.open_settings() is not settings:
+            raise AssertionError("Settings opened a duplicate panel")
+        # Resize the SAME open page, not just a newly created window.
+        for size in ("1920x1080", "800x480", "1280x800", "800x480"):
+            root.geometry(size)
+            settle(10)
+            if isinstance(settings.win, tk.Toplevel):
+                raise TypeError("Settings escaped into a desktop window")
+            for tab in range(6):
+                settings.tabs.select(tab)
+                settle(3)
+                for widget in descendants(settings.win):
+                    if (
+                        isinstance(widget, tk.Button)
+                        and widget.cget("text") in {"SAVE", "SAVE SETTINGS", "CANCEL"}
+                        and widget.winfo_rooty() + widget.winfo_height()
+                        > root.winfo_rooty() + root.winfo_height()
+                    ):
+                        raise AssertionError(f"Settings footer is off-screen at {size}")
+            for _ in range(3):
+                settings._create_connector_wizard()
+                settle(3)
+                dialog = root.grab_current()
+                if (
+                    dialog is settings.win
+                    or dialog.winfo_width() > settings.win.winfo_width()
+                ):
+                    raise AssertionError("Wizard is not bounded by Settings")
+                app.request_fullscreen_toggle()
+                if app.modal:
+                    raise AssertionError(
+                        "Fullscreen shortcut opened authentication behind Settings"
+                    )
+                app.request_windowed_access()
+                settle(3)
+                if root.grab_current() is not settings.win:
+                    raise AssertionError(
+                        "Wizard did not return input ownership to Settings"
+                    )
+        before = (home / "config.json").read_bytes()
+        for invalid in ("0", "-1", "2.5", "true"):
+            settings.vars["api_requests_per_minute"].set(invalid)
+            settings.save()
+            if not settings.error.get() or not settings.win.winfo_exists():
+                raise AssertionError(f"Invalid API budget accepted: {invalid}")
+            if (home / "config.json").read_bytes() != before:
+                raise AssertionError("Invalid budget overwrote saved configuration")
+        settings.vars["api_requests_per_minute"].set("37")
+        settings.save()
+        settle()
+        if app.config["api_requests_per_minute"] != 37:
+            raise AssertionError("API budget above ten was not saved")
+        settings = app.open_settings()
+        settings.vars["api_requests_per_minute"].set("")
+        settings.save()
+        settle()
+        if app.config["api_requests_per_minute"] is not None:
+            raise AssertionError("Blank API budget did not restore inheritance")
+        app.draw_static_error(RuntimeError("offline recovery check"))
+        fallback_items = set(app.canvas.find_all())
+        app.render()
+        if fallback_items.intersection(app.canvas.find_all()):
+            raise AssertionError("Emergency drawing was retained after recovery")
+        if len(app.canvas.find_all()) != len(app.canvas.scene.items):
+            raise AssertionError("Unmanaged canvas items leaked into the scene")
+        v12_settings_verified = True
+    except Exception:
+        record("v1.2 Settings", traceback.format_exc(limit=4))
+        if (
+            getattr(app, "settings_window", None)
+            and app.settings_window.win.winfo_exists()
+        ):
+            app.settings_window.win.destroy()
 
     # --- layout collisions at every supported panel size --------------------
     # The design is one 800x480 logical canvas scaled uniformly, but font sizes
@@ -508,6 +656,12 @@ def main():
         ("HD documentation 1600x960", 1600, 960),
         ("10.1-inch 1280x800", 1280, 800),
         ("desktop 1920x1080", 1920, 1080),
+        ("portrait 480x800", 480, 800),
+        ("portrait HD 1080x1920", 1080, 1920),
+        ("narrow 360x640", 360, 640),
+        ("short 640x400", 640, 400),
+        ("wide 2560x720", 2560, 720),
+        ("nonstandard 913x577", 913, 577),
     ):
         root.geometry(f"{width}x{height}")
         for _ in range(15):
@@ -531,6 +685,9 @@ def main():
                 continue
             # A dialog paints a full-canvas scrim then draws above it; comparing
             # across that boundary would report the screen underneath.
+            # IDs describe allocation order, not stacking order in a retained
+            # scene. find_all() returns the actual bottom-to-top display list.
+            stack = {item: index for index, item in enumerate(canvas.find_all())}
             floor = 0
             for item in canvas.find_all():
                 if canvas.type(item) != "rectangle":
@@ -540,14 +697,14 @@ def main():
                     box
                     and box[0] <= 1
                     and box[1] <= 1
-                    and box[2] >= 799
-                    and box[3] >= 479
+                    and box[2] >= canvas.logical_width - 1
+                    and box[3] >= canvas.logical_height - 1
                 ):
-                    floor = item
+                    floor = stack[item]
             texts = []
             texts_with_ids = []
             for item in canvas.find_all():
-                if item < floor or canvas.type(item) != "text":
+                if stack[item] < floor or canvas.type(item) != "text":
                     continue
                 box = _logical(canvas, item)
                 value = canvas.itemcget(item, "text")
@@ -555,7 +712,12 @@ def main():
                     continue
                 texts.append((box, value))
                 texts_with_ids.append((item, box, value))
-                if box[0] < -1 or box[2] > 801 or box[1] < -1 or box[3] > 481:
+                if (
+                    box[0] < -1
+                    or box[2] > canvas.logical_width + 1
+                    or box[1] < -1
+                    or box[3] > canvas.logical_height + 1
+                ):
                     collisions.append(
                         {
                             "where": where,
@@ -568,7 +730,7 @@ def main():
             # operator actually notices: the label is simply not there.
             covers = []
             for item in canvas.find_all():
-                if item < floor:
+                if stack[item] < floor:
                     continue
                 kind = canvas.type(item)
                 if kind == "image":
@@ -590,7 +752,7 @@ def main():
             for item, box, value in texts_with_ids:
                 area = max(1.0, (box[2] - box[0]) * (box[3] - box[1]))
                 for shape_item, shape in covers:
-                    if shape_item <= item:
+                    if stack[shape_item] <= stack[item]:
                         continue
                     across = min(box[2], shape[2]) - max(box[0], shape[0])
                     down = min(box[3], shape[3]) - max(box[1], shape[1])
@@ -617,6 +779,8 @@ def main():
                         }
                     )
 
+    app.history.close(2)
+    app.logger.close(2)
     root.destroy()
     shutil.rmtree(home, ignore_errors=True)
     print(
@@ -630,6 +794,7 @@ def main():
                 "access_change_verified": access_change_verified,
                 "settings_directory_names_editable": directory_names_editable,
                 "settings_actions_visible_on_7_inch": bool(actions_visible_on_7_inch),
+                "v12_settings_verified": v12_settings_verified,
                 "collisions": collisions,
                 "faults": faults,
             }

@@ -11,6 +11,13 @@ macOS uses `afplay`, and Windows uses `winsound`. Commands use fixed argument ar
 never a shell. Missing hardware/player and playback errors are sanitized and logged
 without blocking the operational workflow. Same-cue cooldown prevents rapid repeats.
 
+In v1.2.0, at most **two** playback workers may run concurrently.
+This ceiling also applies to Test sound and a zero cooldown. Excess cues are
+discarded, not queued for misleading late playback. Normal cue assets, volume and
+workflow triggers are unchanged. Failed thread starts release their slot, and
+closing the application prevents new playback and terminates tracked players,
+including one created during shutdown. These sounds are not a guaranteed alarm.
+
 ## Legal provenance
 
 Every WAV is generated deterministically by `scripts/generate_sound_assets.py` from
@@ -59,3 +66,5 @@ PYTHONPATH=src python3 -m unittest tests.unit.test_audio -v
 
 Tests verify the complete asset allow-list, mono 16-bit PCM, 44.1 kHz, short duration,
 cooldown, safe command construction, and graceful disabled/backend-failure behavior.
+Additional `test_kiosk_hardening` cases cover a 500-preview burst, bounded workers,
+worker-start failure and a player spawning concurrently with shutdown.

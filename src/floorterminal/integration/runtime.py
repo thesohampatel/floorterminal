@@ -4,17 +4,42 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import re
-import threading
+import socket
 import time
-from collections import deque
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from ..core.json_file import decode_strict_json
+from ..core.rate_policy import RequestWindow, request_budget
 from .definition import DefinitionError, IntegrationDefinition
+
+
+def retry_after_seconds(headers):
+    """RFC 9110 Retry-After accepts delay-seconds or an HTTP date."""
+    value = next(
+        (
+            str(value)
+            for key, value in (headers or {}).items()
+            if key.lower() == "retry-after"
+        ),
+        "",
+    )
+    try:
+        if value.strip().isdigit():
+            delay = int(value.strip())
+        else:
+            date = parsedate_to_datetime(value)
+            delay = (date.astimezone(UTC) - datetime.now(UTC)).total_seconds()
+        return max(0, math.ceil(delay)) if math.isfinite(delay) else None
+    except (ValueError, TypeError, OverflowError):
+        return None
 
 
 class IntegrationError(RuntimeError):
@@ -99,14 +124,21 @@ class UrllibTransport:
                     response.status, response.headers, self._read_response(response)
                 )
         except HTTPError as exc:
-            raise TransportHTTPError(
-                exc.code, exc.headers, self._read_response(exc)
-            ) from exc
+            # HTTPError owns an open response too, including rejected/oversized
+            # bodies. Do not leave sockets alive until exception GC during an
+            # extended outage or a service repeatedly answering with 429/5xx.
+            try:
+                body = self._read_response(exc)
+            finally:
+                exc.close()
+            raise TransportHTTPError(exc.code, exc.headers, body) from exc
         except (URLError, TimeoutError, OSError) as exc:
             reason = getattr(exc, "reason", exc)
-            raise IntegrationError(
-                f"Network unavailable: {reason}", "UNAVAILABLE"
-            ) from exc
+            error = IntegrationError(f"Network unavailable: {reason}", "UNAVAILABLE")
+            error.no_request_sent = isinstance(
+                reason, (socket.gaierror, ConnectionRefusedError)
+            )
+            raise error from exc
 
 
 class IntegrationClient:
@@ -127,6 +159,7 @@ class IntegrationClient:
         secrets.update(
             json.dumps(item, ensure_ascii=False)[1:-1] for item in tuple(secrets)
         )
+        secrets.update(quote(item, safe="") for item in tuple(secrets))
         for secret in sorted(secrets, key=len, reverse=True):
             text = text.replace(secret, "[REDACTED]")
         text = " ".join(text.splitlines())
@@ -147,9 +180,13 @@ class IntegrationClient:
         self.authentication_values = self._authentication_values()
         self.config, self.logger = config or {}, logger
         self.transport = transport or UrllibTransport()
-        self.local_request_times, self.lock = deque(), threading.Lock()
+        self.bind_request_window(RequestWindow())
         self.limit = self.remaining = self.reset = self.window_resets_at = None
         self.session_used = 0
+
+    def bind_request_window(self, window):
+        self.request_window = window
+        self.local_request_times, self.lock = window.timestamps, window.lock
 
     def reconfigure(self, definition, config, logger=None):
         self.definition = (
@@ -173,6 +210,8 @@ class IntegrationClient:
                 raise DefinitionError(
                     f"Credential {name} contains prohibited line breaks"
                 )
+            if not credential and (value in {".", ".."} or not value.isprintable()):
+                raise DefinitionError(f"Invalid integration path value: {name}")
             return value if credential else quote(value, safe="")
 
         result = pattern.sub(replace, str(template))
@@ -236,7 +275,7 @@ class IntegrationClient:
             return urlencode(result, doseq=True).encode(
                 "utf-8"
             ), "application/x-www-form-urlencoded"
-        return json.dumps(result, separators=(",", ":")).encode(
+        return json.dumps(result, separators=(",", ":"), allow_nan=False).encode(
             "utf-8"
         ), "application/json"
 
@@ -273,8 +312,14 @@ class IntegrationClient:
             raise DefinitionError(f"{field} has an unsupported value")
         if isinstance(value, str) and len(value) < schema.get("minLength", 0):
             raise DefinitionError(f"{field} is too short")
+        if isinstance(value, str) and len(value) > schema.get("maxLength", len(value)):
+            raise DefinitionError(f"{field} is too long")
+        if isinstance(value, float) and not math.isfinite(value):
+            raise DefinitionError(f"{field} must be finite")
         if isinstance(value, (int, float)) and value < schema.get("minimum", value):
             raise DefinitionError(f"{field} is below its minimum")
+        if isinstance(value, (int, float)) and value > schema.get("maximum", value):
+            raise DefinitionError(f"{field} is above its maximum")
         if isinstance(value, dict):
             missing = [name for name in schema.get("required", []) if name not in value]
             if missing:
@@ -296,7 +341,7 @@ class IntegrationClient:
     @staticmethod
     def _idempotency_key(value):
         value = str(value or "").strip()
-        if not value or len(value) > 128 or "\r" in value or "\n" in value:
+        if not value or len(value) > 128 or not value.isprintable():
             raise DefinitionError(
                 "A valid idempotency key is required for this operation"
             )
@@ -316,6 +361,13 @@ class IntegrationClient:
             if location == "query":
                 query = dict(query or {})
                 query[name] = key
+            elif location == "path":
+                path = dict(path or {})
+                if name in path and str(path[name]) != key:
+                    raise DefinitionError(
+                        "Idempotency path cannot replace a resource identifier"
+                    )
+                path[name] = key
             elif location == "body":
                 body = json.loads(json.dumps(body or {}))
                 self._merge_path(body, name, key)
@@ -328,9 +380,12 @@ class IntegrationClient:
                 template, self.authentication_values, True
             )
         query_aliases = request_definition.get("query_aliases", {})
-        resolved_query = static_query | {
+        supplied_query = {
             query_aliases.get(key, key): value for key, value in (query or {}).items()
         }
+        if set(supplied_query) & set(authentication_query):
+            raise DefinitionError("Request query cannot override authentication fields")
+        resolved_query = static_query | supplied_query
         allowed_query = set(request_definition.get("query_parameters", []))
         unknown_query = set(resolved_query) - allowed_query
         if unknown_query:
@@ -357,7 +412,8 @@ class IntegrationClient:
         if (
             parsed.scheme != "https"
             or parsed.hostname != allowed_host
-            or parsed.username
+            or parsed.username is not None
+            or parsed.fragment
         ):
             raise DefinitionError(
                 "Resolved integration URL violates TLS or host policy"
@@ -400,15 +456,19 @@ class IntegrationClient:
         )
 
     def _budget(self):
-        now = time.monotonic()
-        budget = min(
-            10,
-            max(
-                1,
-                int(self.definition.data["connection"].get("requests_per_minute", 10)),
-            ),
-        )
         with self.lock:
+            budget = self.request_window.budget
+            if budget is None:
+                budget = request_budget(self.config, self.definition.data["connection"])
+            now = time.monotonic()
+            if now < self.request_window.cooldown_until:
+                retry = max(1, math.ceil(self.request_window.cooldown_until - now))
+                raise IntegrationError(
+                    "Connected service requested a pause; updates remain queued",
+                    "RATE_LIMITED",
+                    429,
+                    retry,
+                )
             while self.local_request_times and now - self.local_request_times[0] >= 60:
                 self.local_request_times.popleft()
             if len(self.local_request_times) >= budget:
@@ -431,9 +491,12 @@ class IntegrationClient:
             return len(self.local_request_times)
 
     def _rates(self, headers):
+        headers = {str(k).casefold(): v for k, v in headers.items()}
+
         def number(name):
             try:
-                return int(headers.get(name))
+                value = int(headers.get(str(name).casefold()))
+                return value if value >= 0 else None
             except (TypeError, ValueError, AttributeError):
                 return None
 
@@ -443,6 +506,8 @@ class IntegrationClient:
         self.reset = number(names.get("reset_seconds", "X-Rate-Limit-Reset"))
         if self.reset is not None:
             self.window_resets_at = time.monotonic() + self.reset
+            if self.remaining == 0 and self.reset > 0:
+                self.request_window.defer(self.reset)
 
     def _log(self, event, level="INFO", **details):
         if self.logger:
@@ -454,7 +519,12 @@ class IntegrationClient:
         self, operation_id, path=None, query=None, body=None, idempotency_key=None
     ):
         prepared = self.prepare(
-            operation_id, path, query, body, idempotency_key=idempotency_key
+            operation_id,
+            path,
+            query,
+            body,
+            idempotency_key=idempotency_key
+            or getattr(self, "default_idempotency_key", None),
         )
         started = time.monotonic()
         self._log(
@@ -465,10 +535,16 @@ class IntegrationClient:
         response = None
         budget = 0
         attempt = 0
-        while attempt < prepared.retry_max_attempts:
+        max_attempts = getattr(
+            self, "max_attempts_override", prepared.retry_max_attempts
+        )
+        while attempt < max_attempts:
             attempt += 1
             budget = self._budget()
             try:
+                before_send = getattr(self, "before_send", None)
+                if before_send:
+                    before_send(prepared)
                 response = self.transport.send(
                     prepared,
                     float(
@@ -483,8 +559,10 @@ class IntegrationClient:
             except TransportHTTPError as exc:
                 should_retry = (
                     prepared.retry_safe
+                    and exc.status != 429
+                    and retry_after_seconds(exc.headers) is None
                     and exc.status in prepared.retry_codes
-                    and attempt < prepared.retry_max_attempts
+                    and attempt < max_attempts
                 )
                 if not should_retry:
                     return self._raise_http_error(
@@ -503,7 +581,7 @@ class IntegrationClient:
                     prepared.retry_safe
                     and prepared.retry_network_errors
                     and exc.code == "UNAVAILABLE"
-                    and attempt < prepared.retry_max_attempts
+                    and attempt < max_attempts
                 )
                 if not should_retry:
                     self._log(
@@ -546,9 +624,9 @@ class IntegrationClient:
         if not response.body:
             return {}
         try:
-            parsed = json.loads(response.body)
+            parsed = decode_strict_json(response.body)
             return self._extract_path(parsed, prepared.response_body_path)
-        except (ValueError, UnicodeDecodeError) as exc:
+        except (ValueError, UnicodeDecodeError, RecursionError) as exc:
             raise IntegrationError(
                 "Integration returned invalid JSON",
                 "INVALID_RESPONSE",
@@ -560,6 +638,31 @@ class IntegrationClient:
         self._rates(exc.headers)
         error_map = self.definition.data.get("response", {}).get("error_status_map", {})
         code = error_map.get(str(exc.status), "UNKNOWN")
+        delay = retry_after_seconds(exc.headers)
+        if exc.status == 429:
+            code = "RATE_LIMITED"
+            delay = delay if delay is not None else max(1, self.reset or 60)
+        if delay is not None:
+            self.request_window.defer(delay)
+        sensitive = list(self.authentication_values.values())
+        sensitive.extend(prepared.headers.values())
+        for name, value in prepared.headers.items():
+            if name.casefold() == "authorization":
+                parts = value.split(None, 1)
+                if len(parts) == 2:
+                    sensitive.append(parts[1])
+        # Literal authentication is supported too. Do not leak it when a remote
+        # validation error echoes a header, query credential or body credential.
+        auth = self.definition.data.get("authentication", {})
+        for section in ("query", "body"):
+            for template in auth.get(section, {}).values():
+                try:
+                    sensitive.append(
+                        self._substitute(template, self.authentication_values, True)
+                    )
+                except DefinitionError:
+                    # An unused optional credential was not present/sent.
+                    continue
         text = exc.body.decode("utf-8", "replace")
         try:
             parsed = json.loads(text)
@@ -571,13 +674,9 @@ class IntegrationClient:
                     or parsed.get("errors")
                     or parsed
                 )
-            detail = self._safe_remote_detail(
-                value, sensitive_values=self.authentication_values.values()
-            )
-        except ValueError:
-            detail = self._safe_remote_detail(
-                text, sensitive_values=self.authentication_values.values()
-            )
+            detail = self._safe_remote_detail(value, sensitive_values=sensitive)
+        except (ValueError, RecursionError):
+            detail = self._safe_remote_detail(text, sensitive_values=sensitive)
         self._log(
             "integration_request_failed",
             "ERROR",
@@ -589,5 +688,8 @@ class IntegrationClient:
             duration_ms=round((time.monotonic() - started) * 1000),
         )
         raise IntegrationError(
-            f"Integration request failed ({exc.status}): {detail}", code, exc.status
+            f"Integration request failed ({exc.status}): {detail}",
+            code,
+            exc.status,
+            delay,
         ) from exc

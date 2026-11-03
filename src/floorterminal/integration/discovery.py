@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.config import write_private
+from ..core.json_file import read_bounded_bytes
 from ..core.paths import RUNTIME_ROOT
 from .definition import DefinitionError, IntegrationDefinition
 from .runtime import IntegrationClient, IntegrationError
@@ -88,8 +89,10 @@ def discover_connectors(root=None, selection_file=None):
             candidates.append(ConnectorCandidate(path, error=str(exc)))
     selected_name = ""
     try:
-        selected_name = selection_file.read_text(encoding="utf-8").strip()
-    except OSError:
+        selected_name = (
+            read_bounded_bytes(selection_file, max_bytes=4096).decode("utf-8").strip()
+        )
+    except (OSError, ValueError, UnicodeError):
         pass
     valid = [item for item in candidates if item.valid]
     ready = [item for item in valid if item.ready]
@@ -124,7 +127,9 @@ def select_connector(filename, root=None, selection_file=None):
     return discover_connectors(root, selection_file)
 
 
-def test_connector(candidate, config=None, logger=None, transport=None):
+def test_connector(
+    candidate, config=None, logger=None, transport=None, *, request_window=None
+):
     """Run local validation plus at most one explicitly safe GET request."""
     if not candidate or not candidate.valid:
         return ConnectorTestResult(
@@ -160,9 +165,15 @@ def test_connector(candidate, config=None, logger=None, transport=None):
         )
     started = time.monotonic()
     try:
-        IntegrationClient(definition, config or {}, logger, transport).execute(
-            operation_id, query=diagnostics.get("query", {})
-        )
+        client = IntegrationClient(definition, config or {}, logger, transport)
+        client.max_attempts_override = 1
+        if request_window is not None:
+            client.bind_request_window(request_window)
+        query = diagnostics.get("query", {})
+        prepared = client.prepare(operation_id, query=query)
+        if prepared.body is not None:
+            raise DefinitionError("Read-only diagnostic must not send a request body")
+        client.execute(operation_id, query=query)
     except (DefinitionError, IntegrationError) as exc:
         return ConnectorTestResult(
             False,
@@ -172,7 +183,7 @@ def test_connector(candidate, config=None, logger=None, transport=None):
         )
     return ConnectorTestResult(
         True,
-        "Local validation, HTTPS, authentication, permission and response checks passed",
+        "Local validation and one read-only request passed. Write permissions, mappings and delivery guarantees still require commissioning.",
         operation_id,
         round((time.monotonic() - started) * 1000),
     )

@@ -121,6 +121,7 @@ class UpdateService:
         self._check_lock = threading.Lock()
         self._started_monotonic = time.monotonic()
         self._confirmed = False
+        self._ui_heartbeat = None
         self._journal = journal.Journal()
         self._channel = None
         self._channel_error = ""
@@ -215,6 +216,8 @@ class UpdateService:
             return
         if time.monotonic() - self._started_monotonic < trust.PROBATION_DWELL_SECONDS:
             return
+        if self._ui_heartbeat is None or time.monotonic() - self._ui_heartbeat > 5:
+            return
         try:
             with self._install_lock:
                 self._journal = installer.confirm(self.layout, self._journal)
@@ -226,6 +229,10 @@ class UpdateService:
             )
         except OSError as exc:
             self._log("update_confirmation_failed", "WARNING", error=str(exc))
+
+    def note_ui_heartbeat(self):
+        """Called by Tk only after a healthy event-loop/render cycle."""
+        self._ui_heartbeat = time.monotonic()
 
     # ------------------------------------------------------------------ media
 
@@ -580,7 +587,7 @@ class UpdateService:
             return (
                 LEVEL_ATTENTION,
                 f"Version {record.active_version} is on trial",
-                "Wait for automatic confirmation before another upgrade. Rollback remains available.",
+                "Two-minute health check: reporting and Settings resume after confirmation. Restore remains available.",
             )
         if staged:
             detail = "Newest compatible verified package. An administrator must authorize installation."

@@ -155,7 +155,13 @@ class SecurityRegressionTests(unittest.TestCase):
     def test_audit_directories_and_files_are_private_and_repaired(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "logs"
-            legacy = root / "2026/01/02/activity.jsonl"
+            from datetime import datetime
+
+            legacy = (
+                root
+                / datetime.now().astimezone().strftime("%Y/%m/%d")
+                / "activity.jsonl"
+            )
             legacy.parent.mkdir(parents=True)
             legacy.write_text(json.dumps({"legacy": True}) + "\n")
             root.chmod(0o755)
@@ -175,7 +181,7 @@ class SecurityRegressionTests(unittest.TestCase):
             self.assertEqual(root.stat().st_mode & 0o777, 0o700)
             self.assertEqual(legacy.parent.stat().st_mode & 0o777, 0o700)
             self.assertEqual(legacy.stat().st_mode & 0o777, 0o600)
-            current = next(root.glob("2026/*/*/activity.jsonl"))
+            current = next(root.glob("*/*/*/activity.jsonl"))
             self.assertEqual(current.stat().st_mode & 0o777, 0o600)
 
 

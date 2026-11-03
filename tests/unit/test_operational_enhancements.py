@@ -65,6 +65,7 @@ class OperationalEnhancementTests(unittest.TestCase):
         app.modal = None
         app.RED, app.BLUE, app.GREEN, app.ORANGE = "red", "blue", "green", "orange"
         app.save_state = lambda: None
+        app.perform = lambda _label, action, success: success(action())
         app.notify = lambda *args, **kwargs: None
         app.selected_zones = lambda: ["Station 1"]
         app.zone_summary = lambda empty="Not specified": "Station 1"
@@ -194,6 +195,7 @@ class OperationalEnhancementTests(unittest.TestCase):
         app = SimpleNamespace(
             config={"zones": []},
             sound=SimpleNamespace(update=mock.Mock()),
+            logger=logger,
             update_service=None,
             reload_connector=mock.Mock(),
             root=SimpleNamespace(configure=mock.Mock()),
@@ -211,6 +213,7 @@ class OperationalEnhancementTests(unittest.TestCase):
         settings.app = app
         candidate = {
             "ui_language": "future-locale",
+            "line_name": "Test line",
             "zones": [],
             "ui_colors": dict(DEFAULT_CONFIG["ui_colors"]),
         }
@@ -220,14 +223,11 @@ class OperationalEnhancementTests(unittest.TestCase):
                 "floorterminal.ui.settings.load_translator",
                 return_value=translator,
             ) as load,
-            mock.patch(
-                "floorterminal.ui.settings.ActivityLogger",
-                return_value=logger,
-            ),
         ):
             settings._apply(candidate)
         load.assert_called_once_with("future-locale")
         self.assertIs(app.t, translator)
+        app.reload_connector.assert_called_once_with(logger)
 
     def test_basic_connector_wizard_template_is_valid_and_diagnostic_only(self):
         data = basic_diagnostic_connector(

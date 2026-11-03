@@ -48,6 +48,7 @@
     "query": {"limit": 1}
   },
   "workflow": {
+    "group_targets": {},
     "operations": {
       "load_user": "identity.get",
       "list_users": "user.list",
@@ -115,7 +116,7 @@
     "user.list": {"method": "GET", "path": "/users", "query_parameters": ["limit", "cursor"], "success_codes": [200]},
     "team.list": {"method": "GET", "path": "/teams", "query_parameters": ["limit", "cursor"], "success_codes": [200]},
     "team.members": {"method": "GET", "path": "/teams/{id}/members", "query_parameters": ["limit", "cursor"], "success_codes": [200]},
-    "conversation.list": {"method": "GET", "path": "/conversations", "query_parameters": ["limit", "cursor", "onlyNamed"], "success_codes": [200]},
+    "conversation.list": {"method": "GET", "path": "/conversations", "query_parameters": ["limit", "cursor"], "success_codes": [200]},
     "response_record.create": {"method": "POST", "path": "/response-records", "query_parameters": [], "success_codes": [200, 201], "idempotency": {"location": "header", "name": "Idempotency-Key", "remote_guarantee": true}},
     "response_record.assign": {"method": "PATCH", "path": "/response-records/{id}", "query_parameters": [], "success_codes": [200]},
     "response_record.status": {"method": "PATCH", "path": "/response-records/{id}/status", "query_parameters": [], "success_codes": [200]},

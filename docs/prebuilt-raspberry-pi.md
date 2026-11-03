@@ -8,7 +8,7 @@ external-system connector.
 ## Supported deployment baseline
 
 - 64-bit Raspberry Pi OS on an AArch64 Raspberry Pi;
-- Raspberry Pi 5 is the validated production target; version 1.1.0 was built on
+- Raspberry Pi 5 is the validated production target; version 1.2.0 is built on
   Raspberry Pi OS based on Debian 13 (Trixie), with glibc 2.41;
 - a graphical desktop/compositor session because Tk needs a display server;
 - 7-inch, 10.1-inch, or another commissioned touch display;
@@ -23,22 +23,22 @@ start on an older image, update the supported OS or build from source on that ta
 ## 1. Download the release
 
 Open the repository's **Releases** area and select the required version. For version
-1.1.0, download both the Linux ARM64 archive and its separately published SHA-256
+1.2.0, download both the Linux ARM64 archive and its separately published SHA-256
 checksum file. Do not download source-code archives when you need
 the ready-to-run executable.
 
 Recommended asset names:
 
 ```text
-floorterminal-v1.1.0-linux-arm64.tar.gz
-floorterminal-v1.1.0-linux-arm64.tar.gz.sha256
+floorterminal-v1.2.0-linux-arm64.tar.gz
+floorterminal-v1.2.0-linux-arm64.tar.gz.sha256
 ```
 
 Transfer the files to the Pi with a browser, managed deployment system, removable
 media, or `scp`. Example from another computer:
 
 ```bash
-scp floorterminal-v1.1.0-linux-arm64* pi@PI_ADDRESS:~/Downloads/
+scp floorterminal-v1.2.0-linux-arm64* pi@PI_ADDRESS:~/Downloads/
 ```
 
 ## 2. Verify before extraction
@@ -47,7 +47,7 @@ Verify the supplied archive checksum before extracting:
 
 ```bash
 cd ~/Downloads
-sha256sum -c floorterminal-v1.1.0-linux-arm64.tar.gz.sha256
+sha256sum -c floorterminal-v1.2.0-linux-arm64.tar.gz.sha256
 ```
 
 Compare the displayed digest with the value shown on the trusted GitHub Release over
@@ -57,8 +57,8 @@ Extract the versioned top-level directory:
 
 ```bash
 cd ~/Downloads
-tar -xzf floorterminal-v1.1.0-linux-arm64.tar.gz
-cd floorterminal-v1.1.0-linux-arm64
+tar -xzf floorterminal-v1.2.0-linux-arm64.tar.gz
+cd floorterminal-v1.2.0-linux-arm64
 ```
 
 The bundle's checksum manifest detects changes to every delivered file:
@@ -161,11 +161,16 @@ The original password is **not** a recovery/master override. See
 Open protected Settings and configure:
 
 1. line name and station order;
-2. one to four custom failure choices for every station (`Others` is automatic);
+2. independent production groups, stop scope and each station's failure choices
+   (`Others` is automatic; zero or any number of custom reasons within storage limits);
 3. escalation and micro-stop timing;
 4. Engineering/Quality/Production destination labels;
-5. appearance, accessibility, sound, retention, and storage safeguards;
+5. appearance, accessibility, sound and read-only automatic device-care status;
 6. external connector selection only when required.
+
+These instructions describe v1.2.0. Older versions have different failure-count
+and retention controls. **Automatic device care** under System manages retention
+and reserve space; see [automatic cleanup and its limits](automatic-device-care.md).
 
 Without an enabled connector, station selection, failure capture, local state,
 timers, logs, Settings, and the touchscreen remain available. External response records,

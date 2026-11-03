@@ -2,6 +2,62 @@
 
 This project follows semantic versioning for published releases.
 
+## 1.2.0
+
+### Added
+
+- Independent production groups, group-only/whole-line stop scopes, concurrent
+  incidents and per-group crews, timers, status and conveyor motion.
+- Operator self-fix for permitted minor stoppages, with Engineering handover on
+  the same response and original downtime timeline.
+- Per-station failure catalogues with automatic Others, user-defined reasons,
+  touch paging/search and preserved multi-selection.
+- Private persistent crew rosters with daily idle-time refresh, manual Settings
+  refresh and restart-safe cooldowns; normal picker openings make no directory calls.
+- Standalone incident history and automatic bounded device care for logs/history,
+  without deleting pending delivery or recovery data.
+
+### Changed
+
+- Configurable per-minute request budgets and one independent delivery worker.
+  Local reporting remains available during network loss and rate limiting.
+- Adaptive portrait/landscape/compact kiosk layouts, fullscreen protected pages,
+  touch option sheets, persistent action feedback and reachable Settings footers.
+- Routine 2–3 tap reporting and two-tap arrival, single-person crew edits and
+  completion; optional details and multi-select remain available.
+- Retained canvas items, bounded raster caches and motion phases, reduced redraws
+  behind static pages, and cancellable Settings construction behind a loading cover.
+- Optional schema-1 connector mappings for group assets/locations, structured
+  diagnoses, keyed assignments and original event timestamps. Existing compatible
+  connectors remain usable without replacing their credentials or configuration.
+
+### Fixed
+
+- Restart-safe delivery, acknowledgement retry and partial directory progress under
+  low API budgets; incomplete/ambiguous remote results cannot become a complete list.
+- Canvas-item churn during blink/wrap animation, hidden short-screen station
+  actions, retained picker traces, and unnecessary empty-history state writes.
+- Crew refresh cannot erase verified names on failure, change an open picker,
+  cross connector/team identities or bypass server cooldowns through repeated taps.
+- Documentation snapshots derive current/future versions from the package;
+  installation instructions, operator paths and native screenshots match this version.
+- The screenshot fixture implements the GUI health callback and refuses error-panel
+  captures. CI installs the project's pinned development tools instead of keeping
+  a second, outdated lint-version pin.
+
+### Security and update safety
+
+- Bounded strict JSON inputs, regular-file/permission checks, private runtime data,
+  bounded audit/history housekeeping and closed failed HTTP responses.
+- Real remote idempotency is required for replayable writes; ambiguous native
+  writes remain held for protected reconciliation.
+- USB updates validate detached runtime data, preserve compatible connectors and
+  configuration extensions, retain private checkpoints and require a healthy GUI
+  during probation. Active/pending work and unsafe downgrades block switching.
+- Newer data is never deleted to force an older binary to run. See
+  [upgrade precautions and limitations](docs/releases/v1.2.0.md) and the
+  [dated verification evidence](docs/verification.md).
+
 ## 1.1.0
 
 Reliability, clarity, and display-quality release. Upgrading from 1.0.0 needs no

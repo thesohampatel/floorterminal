@@ -28,8 +28,8 @@ HAS_DISPLAY = display_available()
 class TouchscreenSmokeTests(unittest.TestCase):
     """Render every screen and press every control, in a real Tk session.
 
-    The controller draws in immediate mode and rebuilds its touch targets on every
-    frame, so a fault in one workflow state is invisible from any other. This
+    The controller describes each state in a retained scene and refreshes touch
+    targets with it, so a fault in one workflow state is invisible from another. This
     sweep is the regression barrier for that whole class of defect, including the
     Settings reconciliation path that writes configuration and reapplies it to
     live operator state.
@@ -111,6 +111,9 @@ class TouchscreenSmokeTests(unittest.TestCase):
 
     def test_background_operations_were_dispatched_by_their_controls(self):
         self.assertGreater(self.result.get("dispatched_operations", 0), 0)
+
+    def test_request_budget_panel_resize_and_nested_input_ownership(self):
+        self.assertTrue(self.result.get("v12_settings_verified"))
 
 
 if __name__ == "__main__":

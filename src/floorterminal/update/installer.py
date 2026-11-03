@@ -22,7 +22,7 @@ import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from . import journal, media, trust, version
+from . import compatibility, journal, media, trust, version
 from .journal import ActivationRecord, Journal
 from .layout import InstallLayout
 
@@ -183,6 +183,7 @@ def confirm(layout: InstallLayout, record: Journal | None = None) -> Journal:
         dwell_seconds=trust.PROBATION_DWELL_SECONDS,
     )
     prune(layout, record)
+    compatibility.prune_checkpoints(layout)
     return record
 
 
@@ -209,7 +210,26 @@ def activate(
         raise ActivationError(
             "Wait until the running version is confirmed before another upgrade"
         )
+    try:
+        staged = layout.staging_dir / release_version
+        if not (staged / trust.EXECUTABLE_NAME).is_file():
+            raise ActivationError(
+                f"No verified staged package for version {release_version} is available"
+            )
+        package = media.verify_local_package(staged, release_version)
+        reason = media.check_installable(package, previous)
+        if reason:
+            raise ActivationError(reason)
+        checkpoint = compatibility.checkpoint(
+            layout, release_version, executable=package.artifact
+        )
+    except (compatibility.CompatibilityError, media.MediaError, OSError) as exc:
+        raise ActivationError(str(exc)) from exc
     promote_staged(layout, release_version, installed_version=previous)
+    try:
+        compatibility.assert_unchanged(layout, checkpoint)
+    except (compatibility.CompatibilityError, OSError, ValueError) as exc:
+        raise ActivationError(str(exc)) from exc
     record = journal.read_journal(layout.journal)
     record.state = journal.STATE_PROBATION
     record.previous_version = previous
@@ -360,7 +380,11 @@ def rollback(
             raise ActivationError(f"Rollback verification failed: {exc}") from exc
     if current == target:
         raise ActivationError(f"Version {target} is already active")
-    _swap_link(layout, target)
+    try:
+        checkpoint = compatibility.checkpoint(layout, target)
+        compatibility.assert_unchanged(layout, checkpoint)
+    except (compatibility.CompatibilityError, OSError) as exc:
+        raise ActivationError(str(exc)) from exc
     record.state = journal.STATE_CONFIRMED
     record.previous_version = current or ""
     record.active_version = target
@@ -378,6 +402,7 @@ def rollback(
         )
     )
     _persist(layout, record)
+    _swap_link(layout, target)
     details = {
         "from_version": current or "",
         "to_version": target,
@@ -386,6 +411,7 @@ def rollback(
     journal.append_log(layout.update_log, "update_rolled_back", "WARNING", **details)
     if mirror:
         mirror("update_rolled_back", "WARNING", **details)
+    compatibility.prune_checkpoints(layout)
     return ActivationResult("rolled_back", current or "", target)
 
 

@@ -1,5 +1,14 @@
 # FloorTerminal
 
+**Version 1.2.0.** Independent production groups, operator self-fix with Engineering
+handover, configurable request budgets, persistent team names, flexible station
+failure reasons and adaptive fullscreen kiosk controls.
+[What's new and upgrade precautions](docs/releases/v1.2.0.md) ·
+[Verification and measured limits](docs/verification.md).
+Download only versions and assets published in
+[GitHub Releases](https://github.com/thesohampatel/floorterminal/releases);
+the source version alone does not mean a binary has been published.
+
 <p align="center">
   <img src="branding/floorterminal/floorterminal-mark.svg" width="176" alt="FloorTerminal logo">
 </p>
@@ -23,8 +32,8 @@ escalation procedures.
 
 ![Neutral offline operator console](docs/images/operator-console.png)
 
-Screenshots are native-resolution captures of the real Tk application on a Linux
-X11 display, rendered by the documented capture script — not enlarged thumbnails or
+Screenshots are native-resolution captures of the real Tk application on the Pi's
+graphical display, rendered by the documented capture script — not enlarged thumbnails or
 mockups. Click an image for its original
 pixels. The examples use a **disabled, credential-free connector**: unavailable
 support buttons and **Setup needed** are expected until a site is configured.
@@ -39,15 +48,32 @@ deployment responsibility visible on every installed terminal.
 ## What it provides
 
 - Touch-first selection of any number of stations or the entire line.
-- A separate configurable list of up to five common failures per station.
+- Per-station failure catalogues: Others only, or any number of custom reasons;
+  responsive touch selection, search and paging without losing selections.
 - Local-first event persistence, downtime/repair timers, and restart recovery.
+- v1.2.0: persistent team names, daily idle-time refresh and a manual
+  Settings refresh—no directory read on each crew-picker opening.
 - Unplanned interruption and planned Engineering workflows.
+- v1.2.0: operator-resolved minor stoppages, with an optional name and
+  same-incident Engineering handover if help is needed.
+- v1.2.0: independent production groups, concurrent responses and
+  group-specific conveyor/status displays; each group can stop itself or the
+  whole line. [Setup, connector mapping and overlap rules](docs/station-groups.md).
+- v1.2.0: private local incident history and deliberate standalone
+  reporting, with automatic bounded retention. [Storage and backup guide](docs/local-history.md).
 - Multiple responders whose participation can be edited during active work.
 - Message-only Engineering, Quality, and Production support requests.
 - Independent response-record, messaging, directory, assignment, and asset capabilities.
 - Queued, rate-limited synchronization after connectivity loss.
-- Responsive 7-inch, 10.1-inch, and desktop layouts.
+- v1.2.0: independent background delivery, restart-safe incident
+  queues, cached responder lists and protected review of uncertain writes.
+  Small request budgets resume directory reads; local saves leave animation
+  running and show progress until storage confirms the action.
+- Touchscreen and desktop layouts; v1.2.0 adds portrait, landscape
+  and short-window reflow without a configured display resolution.
 - Status-aware line animation, accessible redundant status cues, and optional sound.
+- v1.2.0: automatic bounded audit retention and background device checks;
+  housekeeping never removes pending reports or incident-recovery data.
 - Signature-verified offline USB software updates with one-touch verified rollback.
 
 ## Download the ready-to-use Raspberry Pi build
@@ -62,7 +88,7 @@ notices, SBOM, deployment instructions, and checksums.
 Look for an asset named like:
 
 ```text
-floorterminal-v1.1.0-linux-arm64.tar.gz
+floorterminal-v1.2.0-linux-arm64.tar.gz
 ```
 
 This is an application bundle—not a Raspberry Pi OS disk image. Install Raspberry Pi
@@ -70,9 +96,9 @@ OS 64-bit with a graphical session first; then download and extract the bundle o
 Pi. The short installation path is:
 
 ```bash
-sha256sum -c floorterminal-v1.1.0-linux-arm64.tar.gz.sha256
-tar -xzf floorterminal-v1.1.0-linux-arm64.tar.gz
-cd floorterminal-v1.1.0-linux-arm64
+sha256sum -c floorterminal-v1.2.0-linux-arm64.tar.gz.sha256
+tar -xzf floorterminal-v1.2.0-linux-arm64.tar.gz
+cd floorterminal-v1.2.0-linux-arm64
 sha256sum -c SHA256SUMS
 chmod +x install.sh floorterminal-launch floorterminal
 ./install.sh
@@ -95,7 +121,8 @@ troubleshooting. Later versions install offline from a signed USB drive; see the
 [update guide](docs/update-user-guide.md). Users who do not trust or cannot use the prebuilt artifact can follow
 [Native release builds](docs/building.md) to reproduce it from source on their Pi.
 Compatibility and verification results are documented in
-[Version 1.1.0 release notes](docs/releases/v1.1.0.md) and
+[Version 1.2.0 release notes](docs/releases/v1.2.0.md),
+[version 1.1.0 release notes](docs/releases/v1.1.0.md) and
 [version 1.0.0 release notes](docs/releases/v1.0.0.md).
 
 ## Software updates
@@ -115,12 +142,14 @@ change on the touchscreen.
 
 ![Software Update panel with a verified update ready](docs/images/update-panel-ready.png)
 
-Each release is installed in its own version slot and selected by one symbolic link,
-so an update replaces the application and nothing else: configuration, connector
-files, saved workflow state, and audit logs are never touched, and the terminal
-resumes exactly where it stopped. The previous version stays installed for one-touch
-rollback, and a version that cannot start is restored automatically by the supervised
-launcher.
+Each release is installed in its own version slot and selected by one symbolic link.
+The v1.2.0 updater checks saved-data compatibility and creates private
+local checkpoints before changing versions. Compatible connector files stay intact;
+missing configuration extensions lost by an older Settings writer can be restored
+without overwriting current edits. Unsafe downgrades are refused instead of dropping
+features or pending reports. Finish responses and synchronization before updating,
+then allow the two-minute GUI health check to complete. The previous executable
+stays installed for verified recovery. See [data preservation and compatibility](docs/update-data-compatibility.md).
 
 Read the [step-by-step update guide](docs/update-user-guide.md) for the operator
 procedure and [Offline software updates](docs/software-updates.md) for the complete
@@ -128,6 +157,20 @@ specification, formats, integrity checks, and failure analysis. When several
 releases or USB packages exist, see [version selection and rollback](docs/update-user-guide.md#multiple-available-versions).
 
 ## Operator workflow
+
+**New in v1.2.0:** touch a station, optionally touch a failure reason,
+then **Report • Engineering** or **Start self-fix** on that same screen: the normal
+single-station report takes 2–3 taps. Arrival, one-person crew changes and safe
+completion take 2 taps when the name is visible in the saved team list.
+**Keep selection / more stations** preserves multi-select; **Select several**
+preserves batch crew edits. Optional details and finding a name take extra taps.
+See the [touch-flow guide](docs/operator-touch-flow.md) for exact steps and limits.
+Self-fix is only for permitted minor work. **Request Engineering** and
+**Engineer arrived** are direct actions on the active screen and hand the
+same incident to Engineering without resetting its downtime. See the
+[operator self-fix walkthrough](docs/operator-self-fix.md) for all paths, messages,
+offline behaviour and safety limits. The walkthrough below shows the Engineering
+path; the linked guide also illustrates self-fix and handover.
 
 ![Illustrative operator report and response walkthrough](docs/images/operator-walkthrough.webp)
 
@@ -152,11 +195,14 @@ report. **Others** permits an optional touchscreen note.
 
 ### 2. Report the interruption
 
-Press **Report a problem** and confirm the deliberate line-down action. The console
+Use **Report • Engineering** on the station sheet, or choose the appropriate
+Engineering/self-fix path from the main reporting control. This deliberately records
+the stop; there is no redundant confirmation on the short Engineering path. The console
 persists the report ID, selection, time, and timer before attempting a network call.
 When supported, the connector creates a detailed response record, assigns the configured
 team, posts lifecycle messages, and marks the asset unavailable. Retries reuse one
-durable idempotency key; enabled create operations require real remote deduplication.
+durable event key. Safely replayable creates require real remote deduplication;
+native endpoints without it use explicit hold-on-ambiguity and administrator review.
 
 ### 3. Record the response
 
@@ -181,7 +227,24 @@ message that names the operation and stays until acknowledged.
 
 Read the complete [operator guide](docs/operator-guide.md).
 
+**v1.2.0:** reporting, repair and production release no longer wait
+for a remote record ID. A durable local journal sends supported operations through
+one independent background worker, respects quota pauses and resumes after restart.
+Touch the queued-updates strip for **Saved updates**; uncertain non-idempotent
+writes require review instead of blind replay. See
+[offline reporting, capacity limits and recovery](docs/offline-delivery.md).
+
 ## Interface and animation
+
+**v1.2.0:** the kiosk now reflows across landscape, portrait, square
+and ultrawide windows. It does not require a configured display resolution. On a
+short screen, the station map and primary actions stay together; on a narrow
+screen, actions stack vertically. Station pages preserve process order and whole-line selection. Settings
+fills the kiosk; long forms have touch-sized Previous/Next controls and optional
+drag/wheel movement, while dialogs keep their action buttons visible.
+See [adaptive kiosk layouts and commissioning](docs/adaptive-kiosk.md) for the
+usability minimum, native preview images, verification and physical-screen checks.
+The walkthrough images show the current interface with disposable offline data.
 
 The production map is a unidirectional line. Conveyor rollers, drive elements,
 process indicators, and products animate only while running; motion and borders
@@ -198,18 +261,30 @@ This recording shows the real conveyor animation. It is downsampled from native
 ## Settings at a glance
 
 Open the sliders button, identify the administrator, and enter the Settings password.
-Changes are validated before saving. All six tabs remain accessible on small displays;
-long administrative forms scroll, while the operator's five-choice failure dialog
-does not require scrolling.
+Changes are validated before saving. All six categories remain accessible on small displays;
+long administrative forms page (or optionally scroll). The operator's failure
+picker shows reasons together when they fit; larger lists use touch paging and
+Find, never tiny buttons or a scrolling list. Others and reporting actions remain
+reachable on every page. Narrow Settings pages use Previous/Next category
+controls, and Save/Cancel stay outside the form. Password/text screens remain
+fullscreen inside the same kiosk, never in an independent desktop window.
 
-| Tab | What you configure |
+| Category | What you configure |
 |---|---|
 | General | Line identity, local operating preferences and workflow choices |
-| Connector | Discovered files, validation results and departmental destinations |
+| Connector | Discovered files, validation results, application request budget, departmental destinations and saved-team refresh |
 | Stations & failures | Any number of named stations and each station's own failure list |
 | Messages | Event titles, descriptions and support-message templates |
-| System | Logs, storage, request budget, security and operational settings |
+| System | Security, sound, animation and read-only automatic device-care status (v1.2.0) |
 | Colors | Consistent display palette |
+
+[Automatic device care](docs/automatic-device-care.md) explains disk budgets,
+adaptive retention, cleanup boundaries and warnings. Log tuning is no longer an
+operator task in v1.2.0; pending reports are never removed to free space.
+
+[Saved team members](docs/team-roster.md) explains the daily refresh, manual
+**Refresh team members** control and offline behavior. Names are cached in private
+runtime state, not inserted into the connector or editable configuration.
 
 <details>
 <summary>View high-resolution Settings screenshots</summary>
@@ -284,10 +359,12 @@ Use protected Settings or edit owner-only `config.json` while stopped:
 }
 ```
 
-Every station must have one to four custom choices. **Others** is added automatically
-as the fifth choice and must not be listed in JSON. Startup rejects missing, unknown,
-duplicated, empty, or oversized lists. Names are arbitrary; no OP/GP convention is
-required.
+Every station needs its own custom-reason array. Use `[]` for **Others only**, or
+add as many unique, nonempty printable reasons as needed. **Others** is added
+automatically and must not be listed in JSON. There is no fixed count limit;
+configuration and recovery-file size safeguards still apply. Names are arbitrary;
+no station naming convention is required. Existing four-reason lists still work.
+See [failure catalogue setup and selection](docs/failure-reasons.md).
 See the complete [configuration reference](docs/configuration.md).
 
 ## Connect an external system
@@ -313,6 +390,11 @@ without breaking local reporting or correctly configured response-record/asset f
 Multiple files can be discovered, but only one validated connector drives a terminal.
 Read the full [Connector v1 contract](docs/connector.md).
 
+Use the [connector commissioning checklist](docs/connector-commissioning.md) to map
+record creation, assignments, asset history, group/person messaging, pagination and
+delivery guarantees. The application never assumes that a remote status change
+starts a labor timer, or that an arbitrary header prevents duplicate records.
+
 ## Raspberry Pi 64-bit build and kiosk
 
 Build on the target OS/architecture; PyInstaller is not a cross-compiler:
@@ -335,6 +417,8 @@ graphical-session startup. Unexpected exit restarts the kiosk.
 
 See [Building](docs/building.md), [Operations](docs/operations.md), and
 [industrial acceptance](docs/industrial-deployment.md).
+For Pi 5 resource behavior, safe local files, hardware checks and commissioning,
+see [Pi kiosk hardening](docs/pi-kiosk-hardening.md).
 
 ## Release contents and safeguards
 
@@ -346,7 +430,7 @@ files. It rejects secrets, private plaintext passwords, enabled integrations, so
 bytecode, logs, and runtime state. Owner build records are ignored private artifacts.
 
 Security controls include HTTPS and host allow-lists, no redirects, bounded responses,
-data-only connectors, a 10-request rolling-minute application ceiling, 90% shared
+data-only connectors, a configurable rolling-minute application budget, 90% shared
 limit warning, atomic owner-private files, stable retry keys, strict state recovery,
 PBKDF2 Settings authentication, progressive throttling, authorized kiosk exit,
 symlink-resistant/redacted audit logs, and fixed no-shell audio commands. Software
@@ -377,6 +461,9 @@ are needed.
 The automated integrity checks verify the public file set, signed channel, version
 agreement, and pinned CI actions. See [verification scope](docs/verification.md)
 for measured results and deployment limitations.
+For an authorized spare-terminal test on the actual display, use the
+[isolated fullscreen panel check](docs/pi-kiosk-hardening.md#checking-a-physical-panel-safely).
+It does not install development code over a production release.
 
 ## Repository map
 
@@ -408,11 +495,17 @@ docs/                                operations, API, assurance, and user docs
 ## Documentation and project policy
 
 - [Operator guide](docs/operator-guide.md)
+- [Adaptive kiosk layouts and native previews — v1.2.0](docs/adaptive-kiosk.md)
+- [Rendering, touch feedback and measured performance](docs/ui-performance.md)
 - [Prebuilt Raspberry Pi installation](docs/prebuilt-raspberry-pi.md)
 - [Update guide](docs/update-user-guide.md) and [offline software updates](docs/software-updates.md)
+- [Offline reporting and saved-update recovery](docs/offline-delivery.md)
 - [Version 1.1.0 release notes](docs/releases/v1.1.0.md)
+- [Version 1.2.0 release notes](docs/releases/v1.2.0.md)
 - [Version 1.0.0 release notes](docs/releases/v1.0.0.md)
 - [Configuration](docs/configuration.md) and [Connector v1](docs/connector.md)
+- [Saved team members and daily directory refresh](docs/team-roster.md) — v1.2.0
+- [Per-station failure reasons](docs/failure-reasons.md) and [independent production groups](docs/station-groups.md) — v1.2.0
 - [Sound](docs/sound.md), [Accessibility evidence](docs/accessibility.md), [Architecture](docs/architecture.md), and [Operations](docs/operations.md)
 - [Requirements traceability](docs/traceability.md) and [product lifecycle](docs/lifecycle.md)
 - [Building from source](docs/building.md) and [verification scope](docs/verification.md)

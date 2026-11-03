@@ -5,6 +5,9 @@ from floorterminal.app import FloorTerminalApp
 from floorterminal.i18n import load_translator
 from floorterminal.storage.state import INITIAL_STATE
 from floorterminal.ui import update_view
+from floorterminal.ui.dialogs import AdaptiveDialogMixin
+from floorterminal.ui.kiosk import KioskViewMixin
+from floorterminal.ui.layout import Viewport
 from floorterminal.ui.update_view import TAB_KEYS, UpdateViewMixin
 from floorterminal.update import remote, trust
 from floorterminal.update.service import (
@@ -29,7 +32,7 @@ class RecordingCanvas:
         return record
 
 
-class ViewHarness(UpdateViewMixin):
+class ViewHarness(KioskViewMixin, AdaptiveDialogMixin, UpdateViewMixin):
     """The update drawing code with the console's primitives stubbed out."""
 
     BG, CARD, TEXT, MUTED = "#F3F5F9", "#FFFFFF", "#14213D", "#718096"
@@ -53,6 +56,21 @@ class ViewHarness(UpdateViewMixin):
         self.texts = []
         self.buttons = []
         self._status = status
+        self.busy = False
+
+    def viewport(self):
+        return Viewport(800, 480, 1)
+
+    def measure_label(self, value, size=10, weight="normal"):
+        return len(value) * size * 0.7
+
+    def modal_card(self, *args, **kwargs):
+        self.rounded(*args, **kwargs)
+
+    def paragraph_page(self, box, paragraphs, owner=None):
+        # The real-Tk sweep verifies wrapping/pagination. This harness records
+        # all pages so feature/help-content assertions do not depend on page one.
+        self.texts.extend(value for pair in paragraphs for value in pair)
 
     def update_status(self):
         return self._status
@@ -141,7 +159,7 @@ class PanelDrawingTests(unittest.TestCase):
         harness.draw_update_panel()
         self.assertNotIn("update_install", harness.hitboxes)
         self.assertNotIn("update_rollback", harness.hitboxes)
-        self.assertIn("NO UPDATE ACTION AVAILABLE", harness.texts)
+        self.assertIn("OFFLINE UPDATES", harness.texts)
 
         harness = ViewHarness(
             status(level=LEVEL_ATTENTION, staged=staged(), managed=True)
@@ -326,7 +344,7 @@ class ApplicationWiringTests(unittest.TestCase):
         )
         self.assertIn("software_update_authorization_requested", app.logger.names)
 
-    def test_authorization_warns_when_the_line_is_not_running(self):
+    def test_authorization_blocks_when_the_line_is_not_running(self):
         service = self.Service(
             status(level=LEVEL_ATTENTION, staged=staged(), managed=True)
         )
@@ -334,8 +352,8 @@ class ApplicationWiringTests(unittest.TestCase):
         app.state["status"] = "REPAIRING"
         app.open_update_panel()
         app.handle_update_control("install")
-        self.assertIn("REPAIRING", app.modal["prompt"])
-        self.assertIn("restarts and resumes", app.modal["prompt"])
+        self.assertEqual(app.modal["kind"], "update")
+        self.assertIn("Finish all active responses", app.toast_text)
 
     def test_actions_are_refused_when_nothing_is_available(self):
         service = self.Service(status(level=LEVEL_OK, managed=True))

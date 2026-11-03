@@ -300,6 +300,16 @@ class UpdateServiceTests(unittest.TestCase):
         follower._started_monotonic -= trust.PROBATION_DWELL_SECONDS + 1
         follower._maybe_confirm()
         self.assertEqual(
+            journal.read_journal(self.layout.journal).state, journal.STATE_PROBATION
+        )
+        follower._ui_heartbeat = time.monotonic() - 10
+        follower._maybe_confirm()
+        self.assertEqual(
+            journal.read_journal(self.layout.journal).state, journal.STATE_PROBATION
+        )
+        follower.note_ui_heartbeat()
+        follower._maybe_confirm()
+        self.assertEqual(
             journal.read_journal(self.layout.journal).state, journal.STATE_CONFIRMED
         )
 

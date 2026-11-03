@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import math
+
 from ..core.config import DEFAULT_CONFIG
 from .definition import IntegrationDefinition
-from .runtime import IntegrationClient
+from .mapping import expand_fields, read_field
+from .runtime import IntegrationClient, IntegrationError
 
 
 class ConfiguredIntegration:
@@ -26,6 +29,7 @@ class ConfiguredIntegration:
             "authenticated_subject_id", ""
         )
         self.name_cache = {"team": {}, "conversation": {}, "user": {}}
+        self.directory_progress = {}
 
     @property
     def connected(self):
@@ -86,6 +90,7 @@ class ConfiguredIntegration:
         )
         self.api_user_name = ""
         self.name_cache = {"team": {}, "conversation": {}, "user": {}}
+        self.directory_progress = {}
 
     def _load_workflow(self):
         extension = self.definition.workflow
@@ -105,13 +110,24 @@ class ConfiguredIntegration:
             ) from exc
 
     def _execute(self, semantic_name, **kwargs):
+        if "body" in kwargs:
+            kwargs["body"] = expand_fields(kwargs["body"])
         return self.client.execute(self._operation(semantic_name), **kwargs)
 
     def _collection(self, semantic_name, data):
         value = data
-        for key in str(self.collections.get(semantic_name, semantic_name)).split("."):
-            value = value.get(key, []) if isinstance(value, dict) else []
-        return value if isinstance(value, list) else []
+        for key in filter(
+            None, self.collections.get(semantic_name, semantic_name).split(".")
+        ):
+            value = value.get(key) if isinstance(value, dict) else None
+        if not isinstance(value, list) or any(
+            not isinstance(item, dict) for item in value
+        ):
+            raise IntegrationError(
+                f"Directory {semantic_name} is missing or is not a list of objects",
+                "INVALID_RESPONSE",
+            )
+        return value
 
     def _field(self, semantic_name, default):
         return str(self.fields.get(semantic_name, default))
@@ -120,8 +136,13 @@ class ConfiguredIntegration:
         value = data
         path = str(self.objects.get(semantic_name, "")).strip()
         for key in filter(None, path.split(".")):
-            value = value.get(key, {}) if isinstance(value, dict) else {}
-        return value if isinstance(value, dict) else {}
+            value = value.get(key) if isinstance(value, dict) else None
+        if not isinstance(value, dict):
+            raise IntegrationError(
+                f"Response is missing its configured {semantic_name} object",
+                "INVALID_RESPONSE",
+            )
+        return value
 
     def _value(self, group, value):
         return self.values.get(group, {}).get(str(value).upper(), value)
@@ -135,13 +156,20 @@ class ConfiguredIntegration:
             if kind == "string":
                 return str(value)
             if kind == "integer":
-                if isinstance(value, bool):
+                if (
+                    isinstance(value, bool)
+                    or isinstance(value, float)
+                    and (not math.isfinite(value) or not value.is_integer())
+                ):
                     raise ValueError
                 return int(value)
             if kind == "number":
                 if isinstance(value, bool):
                     raise ValueError
-                return float(value)
+                result = float(value)
+                if not math.isfinite(result):
+                    raise ValueError
+                return result
             if kind == "boolean":
                 if isinstance(value, bool):
                     return value
@@ -150,17 +178,17 @@ class ConfiguredIntegration:
                 if str(value).strip().casefold() in {"false", "0"}:
                     return False
                 raise ValueError
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise RuntimeError(
                 f"Connector cannot convert {semantic_name} to {kind}"
             ) from exc
         return value
 
     def _record_name(self, record):
-        direct = str(record.get(self._field("name", "name"), "")).strip()
+        direct = str(read_field(record, self._field("name", "name")) or "").strip()
         if direct:
             return direct
-        return f"{record.get(self._field('first_name', 'firstName'), '')} {record.get(self._field('last_name', 'lastName'), '')}".strip()
+        return f"{read_field(record, self._field('first_name', 'firstName')) or ''} {read_field(record, self._field('last_name', 'lastName')) or ''}".strip()
 
     def load_identity(self):
         if not self.api_user_id:
@@ -173,6 +201,20 @@ class ConfiguredIntegration:
             self.name_cache["user"][name.casefold()] = self.api_user_id
         return name
 
+    def _assignee(self, kind, identifier):
+        """Support explicitly declared keyed IDs as well as typed ID objects."""
+        keyed = "team_assignee_id" if kind == "TEAM" else "user_assignee_id"
+        if keyed in self.fields:
+            return {
+                self.fields[keyed]: self._typed(
+                    keyed if keyed in self.field_types else "assignee_id", identifier
+                )
+            }
+        return {
+            self._field("assignee_type", "type"): self._value("assignee_type", kind),
+            self._field("assignee_id", "id"): self._typed("assignee_id", identifier),
+        }
+
     def create_response_record(
         self,
         title,
@@ -184,32 +226,25 @@ class ConfiguredIntegration:
         idempotency_key=None,
     ):
         if not self.definition.capabilities.get("response_records"):
-            raise RuntimeError("The connector does not provide response-record creation")
+            raise RuntimeError(
+                "The connector does not provide response-record creation"
+            )
         body = {
             self._field("title", "title"): title,
             self._field("description", "description"): description,
             self._field("priority", "priority"): self._value("priority", priority),
             self._field("work_type", "type"): self._value(
-                "work_type", work_type or self.config.get("response_record_type", "REACTIVE")
+                "work_type",
+                work_type or self.config.get("response_record_type", "REACTIVE"),
             ),
         }
-        assignee_type, assignee_id = (
-            self._field("assignee_type", "type"),
-            self._field("assignee_id", "id"),
-        )
         if team_id:
             body[self._field("assignees", "assignees")] = [
-                {
-                    assignee_type: self._value("assignee_type", "TEAM"),
-                    assignee_id: self._typed("assignee_id", team_id),
-                }
+                self._assignee("TEAM", team_id)
             ]
         for user_id in participant_ids or []:
             body.setdefault(self._field("assignees", "assignees"), []).append(
-                {
-                    assignee_type: self._value("assignee_type", "USER"),
-                    assignee_id: self._typed("assignee_id", user_id),
-                }
+                self._assignee("USER", user_id)
             )
         if self.config.get("asset_id"):
             body[self._field("asset_id", "assetId")] = self._typed(
@@ -219,15 +254,46 @@ class ConfiguredIntegration:
             body[self._field("location_id", "locationId")] = self._typed(
                 "location_id", self.config["location_id"]
             )
+        # Optional structured metadata: never guess unsupported provider fields.
+        for key in (
+            "asset_ids",
+            "location_ids",
+            "group_ids",
+            "group_names",
+            "affected_stations",
+            "reported_stations",
+            "impact_scope",
+            "incident_id",
+            "failure_details",
+        ):
+            if key in self.fields and key in self.config:
+                value = self.config[key]
+                body[self.fields[key]] = (
+                    [self._typed(key, item) for item in value]
+                    if isinstance(value, list)
+                    else self._typed(key, value)
+                )
         response = self._execute(
             "create_response_record", body=body, idempotency_key=idempotency_key
         )
         record = self._object("created_response_record", response)
-        result = dict(response)
-        identifier = record.get(self._field("response_record_id", "id"))
-        number = record.get(self._field("response_record_reference", "reference"))
-        if identifier is not None:
-            result["id"] = identifier
+        result = {}
+        identifier = read_field(record, self._field("response_record_id", "id"))
+        number = read_field(
+            record, self._field("response_record_reference", "reference")
+        )
+        if (
+            isinstance(identifier, bool)
+            or not isinstance(identifier, (str, int))
+            or not str(identifier).strip()
+            or len(str(identifier)) > 200
+            or not str(identifier).isprintable()
+        ):
+            raise IntegrationError(
+                "Creation returned no usable mapped record identifier",
+                "INVALID_RESPONSE",
+            )
+        result["id"] = identifier
         if number is not None:
             result["reference"] = number
         return result
@@ -266,12 +332,30 @@ class ConfiguredIntegration:
             body[self._field("status_description", "description")] = str(description)
         if started_at:
             body[self._field("started_at", "startedAt")] = str(started_at)
-        return self._execute(
+        response = self._execute(
             "create_asset_status",
             path={"assetId": asset_id},
             body=body,
             idempotency_key=idempotency_key,
         )
+        # Asset-event IDs are optional; only an explicitly mapped response object
+        # is inspected. No external envelope names belong in the controller.
+        if "created_asset_status" not in self.objects:
+            return {}
+        record = self._object("created_asset_status", response)
+        identifier = read_field(record, self._field("asset_status_id", "id"))
+        if identifier is None:
+            return {}
+        if (
+            isinstance(identifier, bool)
+            or not isinstance(identifier, (str, int))
+            or not str(identifier).strip()
+            or len(str(identifier)) > 200
+        ):
+            raise IntegrationError(
+                "Asset event returned an invalid mapped identifier", "INVALID_RESPONSE"
+            )
+        return {"id": identifier}
 
     def set_response_record_status(self, response_record_id, status):
         if not self.definition.capabilities.get("response_record_status"):
@@ -289,23 +373,8 @@ class ConfiguredIntegration:
     def assign_participants(self, response_record_id, team_id, user_ids):
         if not self.definition.capabilities.get("response_record_assignments"):
             return {}
-        type_field, id_field = (
-            self._field("assignee_type", "type"),
-            self._field("assignee_id", "id"),
-        )
-        assignees = [
-            {
-                type_field: self._value("assignee_type", "TEAM"),
-                id_field: self._typed("assignee_id", team_id),
-            }
-        ]
-        assignees.extend(
-            {
-                type_field: self._value("assignee_type", "USER"),
-                id_field: self._typed("assignee_id", user_id),
-            }
-            for user_id in user_ids
-        )
+        assignees = [self._assignee("TEAM", team_id)] if team_id is not None else []
+        assignees.extend(self._assignee("USER", user_id) for user_id in user_ids)
         return self._execute(
             "update_response_record",
             path={"id": response_record_id},
@@ -320,51 +389,56 @@ class ConfiguredIntegration:
         )
         result = []
         for record in records:
-            identifier = record.get(self._field("id", "id"))
+            identifier = read_field(record, self._field("id", "id"))
             if identifier is None:
                 continue
             result.append(
                 {
                     "id": identifier,
-                    "displayName": self._record_name(record)
-                    or f"User #{identifier}",
+                    "displayName": self._record_name(record) or f"User #{identifier}",
                 }
             )
         return result
 
     def _paged_collection(self, collection, operation, path=None, query=None):
         """Read a bounded cursor-paginated directory without looping on bad cursors."""
-        items, cursor, seen = [], None, set()
-        pages = max(1, int(self.config.get("directory_max_pages", 3)))
-        for _ in range(pages):
-            page_query = {"limit": 200, **(query or {})}
-            if cursor is not None:
-                page_query["cursor"] = cursor
-            data = self._execute(operation, path=path, query=page_query)
-            items.extend(self._collection(collection, data))
-            cursor = data.get(self._field("next_cursor", "nextCursor"))
-            marker = str(cursor) if cursor is not None else ""
-            if not marker or marker in seen:
-                break
-            seen.add(marker)
-        return items
+        from .directory import read_directory
+
+        return read_directory(self, collection, operation, path, query)
 
     def _cache_directory(self, teams, conversations, users):
-        for resource, items in (("team", teams), ("conversation", conversations)):
+        for resource, items in (
+            ("team", teams),
+            ("conversation", conversations),
+            ("user", users),
+        ):
+            if items is None:
+                continue
+            resolved = {}
             for item in items:
                 name, identifier = (
                     self._record_name(item),
-                    item.get(self._field("id", "id")),
+                    read_field(item, self._field("id", "id")),
                 )
                 if name and identifier is not None:
-                    self.name_cache[resource][name.casefold()] = identifier
-        for user in users:
-            name, identifier = (
-                self._record_name(user),
-                user.get(self._field("id", "id")),
+                    key = name.casefold()
+                    # None marks an ambiguous name. Never silently choose the
+                    # last person/group returned by an external directory.
+                    if key in resolved and resolved[key] != identifier:
+                        resolved[key] = None
+                    else:
+                        resolved[key] = identifier
+            # Replace this bounded snapshot instead of accumulating stale names
+            # for the lifetime of an unattended kiosk.
+            self.name_cache[resource] = resolved
+
+    def _cached_identifier(self, resource, wanted):
+        identifier = self.name_cache[resource][wanted]
+        if identifier is None:
+            raise RuntimeError(
+                f'Multiple configured {resource}s are named "{wanted}"; make the name unique'
             )
-            if name and identifier is not None:
-                self.name_cache["user"][name.casefold()] = identifier
+        return identifier
 
     def directory(self):
         teams = (
@@ -373,23 +447,34 @@ class ConfiguredIntegration:
             else []
         )
         conversations = (
-            self._paged_collection(
-                "conversations", "list_conversations", query={"onlyNamed": "true"}
-            )
-            if self.definition.capabilities.get("messaging")
+            self._paged_collection("conversations", "list_conversations")
+            if self._message_route("conversation")
             else []
         )
         users = (
             self._paged_collection("users", "list_users")
             if self.definition.capabilities.get("team_directory")
-            or self.definition.capabilities.get("messaging")
+            or self._message_route("user")
             else []
         )
         self._cache_directory(teams, conversations, users)
-        targets = {
+        group_names = {
             self._record_name(item) for item in conversations if self._record_name(item)
         }
-        targets.update(self._record_name(user) for user in users)
+        user_names = {
+            self._record_name(user) for user in users if self._message_route("user")
+        }
+        collisions = {name.casefold() for name in group_names} & {
+            name.casefold() for name in user_names
+        }
+        targets = {
+            ("conversation:" if name.casefold() in collisions else "") + name
+            for name in group_names
+        } | {
+            ("user:" if name.casefold() in collisions else "") + name
+            for name in user_names
+            if name
+        }
         return {
             "teams": sorted(
                 {self._record_name(item) for item in teams if self._record_name(item)}
@@ -424,25 +509,53 @@ class ConfiguredIntegration:
         if not self.definition.capabilities.get("messaging"):
             return {}
         wanted = str(target_name).strip().casefold()
+        route, separator, unqualified = wanted.partition(":")
+        explicit = route if separator and route in {"conversation", "user"} else None
+        if explicit:
+            wanted = unqualified.strip()
         if not wanted:
             raise RuntimeError("Configure a conversation or person name first")
-        if (
-            wanted not in self.name_cache["conversation"]
-            and wanted not in self.name_cache["user"]
-        ):
-            conversations = self._paged_collection(
-                "conversations", "list_conversations", query={"onlyNamed": "true"}
+        routes = [
+            kind
+            for kind in ("conversation", "user")
+            if self._message_route(kind) and (not explicit or explicit == kind)
+        ]
+        if not routes:
+            raise RuntimeError("The connector does not provide that messaging route")
+        # Resolve all applicable directories before choosing. A group and person
+        # with the same display name must never silently select the wrong target.
+        for kind in routes:
+            if (
+                wanted in self.name_cache[kind]
+                and self.name_cache[kind][wanted] is None
+            ):
+                self._cached_identifier(kind, wanted)
+        for kind in routes:
+            items = self._paged_collection(kind + "s", "list_" + kind + "s")
+            self._cache_directory(
+                None,
+                items if kind == "conversation" else None,
+                items if kind == "user" else None,
             )
-            users = self._paged_collection("users", "list_users")
-            self._cache_directory([], conversations, users)
-        if wanted in self.name_cache["conversation"]:
+        matches = [kind for kind in routes if wanted in self.name_cache[kind]]
+        if len(matches) > 1:
+            raise RuntimeError(
+                "Recipient name matches both a group and a person; use conversation:Name or user:Name"
+            )
+        if matches == ["conversation"]:
             return self._send_conversation(
-                self.name_cache["conversation"][wanted], content
+                self._cached_identifier("conversation", wanted), content
             )
-        if wanted in self.name_cache["user"]:
-            return self._send_user(self.name_cache["user"][wanted], content)
+        if matches == ["user"]:
+            return self._send_user(self._cached_identifier("user", wanted), content)
         raise RuntimeError(
             f'No configured conversation or user named "{target_name}" was found'
+        )
+
+    def _message_route(self, kind):
+        return (
+            self.definition.capabilities.get("messaging")
+            and f"send_{kind}_message" in self.operations
         )
 
     def resolve_name(self, resource, name):
@@ -451,15 +564,13 @@ class ConfiguredIntegration:
             raise RuntimeError(f"Configure a {resource} name first")
         if resource not in {"team", "conversation"}:
             raise RuntimeError(f"Unsupported lookup resource: {resource}")
-        if wanted in self.name_cache[resource]:
-            return self.name_cache[resource][wanted]
+        if (
+            wanted in self.name_cache[resource]
+            and self.name_cache[resource][wanted] is None
+        ):
+            return self._cached_identifier(resource, wanted)
         semantic = "list_teams" if resource == "team" else "list_conversations"
-        query = (
-            {"limit": 200}
-            if resource == "team"
-            else {"limit": 200, "onlyNamed": "true"}
-        )
-        items = self._paged_collection(resource + "s", semantic, query=query)
+        items = self._paged_collection(resource + "s", semantic)
         matches = [
             item for item in items if self._record_name(item).casefold() == wanted
         ]
@@ -469,6 +580,6 @@ class ConfiguredIntegration:
             raise RuntimeError(
                 f'Multiple configured {resource}s are named "{name}"; make the name unique'
             )
-        result = matches[0][self._field("id", "id")]
+        result = read_field(matches[0], self._field("id", "id"))
         self.name_cache[resource][wanted] = result
         return result

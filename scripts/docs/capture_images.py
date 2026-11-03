@@ -17,7 +17,6 @@ import json
 import os
 import secrets
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -53,6 +52,7 @@ def _prepare_runtime():
         runtime / "project_profile.json"
     )
     os.environ["FLOORTERMINAL_DISABLE_UPDATE_NETWORK"] = "1"
+    os.environ["FLOORTERMINAL_DISABLE_NETWORK"] = "1"
     return runtime
 
 
@@ -74,9 +74,17 @@ class StaticUpdateService:
     def request_scan(self):
         return None
 
+    def note_ui_heartbeat(self):
+        # The live poll loop calls this even for a view-only snapshot. No
+        # probation or health acknowledgement is performed by the fixture.
+        return None
+
 
 def _snapshots():
-    from floorterminal.update import remote
+    from datetime import UTC, datetime
+
+    from floorterminal import __version__
+    from floorterminal.update import remote, version
     from floorterminal.update.service import (
         LEVEL_ATTENTION,
         LEVEL_OK,
@@ -86,30 +94,40 @@ def _snapshots():
     )
 
     now = time.time()
+    current_version = str(version.parse(__version__))
+    parsed = version.parse(current_version)
+    next_version = f"{parsed.major}.{parsed.minor + 1}.0"
+    previous_version = (
+        f"{parsed.major}.{parsed.minor - 1}.0"
+        if parsed.minor else f"{max(0, parsed.major - 1)}.0.0"
+    )
+    current_stamp = datetime.fromtimestamp(now, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    next_stamp = datetime.fromtimestamp(now + 90 * 86400, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # These are illustrative view snapshots, never a live release announcement.
     current_channel = remote.ChannelResult(
         outcome=remote.OUTCOME_OK,
         checked_at_epoch=now,
-        checked_at_utc="2026-09-29T12:00:00Z",
-        version="1.1.0",
-        released_utc="2026-09-29T00:00:00Z",
-        release_title="Reliable completion and sharper touchscreen",
+        checked_at_utc=current_stamp,
+        version=current_version,
+        released_utc=current_stamp,
+        release_title=f"FloorTerminal {current_version}",
         release_summary="The installed release is the latest published version.",
         minimum_upgradable_version="1.0.0",
-        archive_name="floorterminal-v1.1.0-linux-arm64.tar.gz",
+        archive_name=f"floorterminal-v{current_version}-linux-arm64.tar.gz",
         signing_key_id="ba1b79d27fddd67a",
     )
     next_channel = remote.ChannelResult(
         outcome=remote.OUTCOME_OK,
         checked_at_epoch=now,
-        checked_at_utc="2027-01-14T09:00:00Z",
-        version="1.2.0",
-        released_utc="2027-01-14T09:00:00Z",
-        release_title="Reliability and accessibility update",
+        checked_at_utc=next_stamp,
+        version=next_version,
+        released_utc=next_stamp,
+        release_title="Illustrative next release",
         release_summary=(
             "Clearer first-response guidance with update and recovery refinements."
         ),
         minimum_upgradable_version="1.0.0",
-        archive_name="floorterminal-v1.2.0-linux-arm64.tar.gz",
+        archive_name=f"floorterminal-v{next_version}-linux-arm64.tar.gz",
         artifact_sha256="a" * 64,
         signing_key_id="ba1b79d27fddd67a",
         features=(
@@ -123,7 +141,7 @@ def _snapshots():
         security=("Stricter offline package validation",),
     )
     staged = StagedUpdate(
-        version="1.2.0",
+        version=next_version,
         release_title=next_channel.release_title,
         release_summary=next_channel.release_summary,
         released_utc=next_channel.released_utc,
@@ -134,64 +152,64 @@ def _snapshots():
     )
     history = (
         {
-            "at_utc": "2026-09-29T12:05:00Z",
+            "at_utc": current_stamp,
             "action": "confirmed",
             "from_version": "",
-            "to_version": "1.1.0",
+            "to_version": current_version,
             "outcome": "ok",
             "source": "supervisor",
         },
         {
-            "at_utc": "2026-09-29T12:00:00Z",
+            "at_utc": current_stamp,
             "action": "activated",
-            "from_version": "1.0.0",
-            "to_version": "1.1.0",
+            "from_version": previous_version,
+            "to_version": current_version,
             "outcome": "ok",
             "authorized_by": "Site administrator",
         },
     )
     current = UpdateStatus(
         level=LEVEL_OK,
-        headline="Version 1.1.0 is up to date",
+        headline=f"Version {current_version} is up to date",
         detail="This terminal is running the latest verified published release.",
-        installed_version="1.1.0",
+        installed_version=current_version,
         managed=True,
         state="active",
         channel=current_channel,
-        latest_version="1.1.0",
+        latest_version=current_version,
         history=history,
     )
     available = UpdateStatus(
         level=LEVEL_ATTENTION,
-        headline="Version 1.2.0 is available",
+        headline=f"Version {next_version} is available",
         detail=(
             "A newer signed release is published. Download it on another computer "
             "and prepare the documented update drive."
         ),
-        installed_version="1.1.0",
+        installed_version=current_version,
         managed=True,
         state="active",
         channel=next_channel,
         update_available=True,
-        latest_version="1.2.0",
+        latest_version=next_version,
         history=history,
     )
     ready = UpdateStatus(
         level=LEVEL_ATTENTION,
-        headline="Version 1.2.0 is verified and ready",
+        headline=f"Version {next_version} is verified and ready",
         detail=(
             "The package on FLOORTERM passed its signature, manifest, and "
             "executable checksum checks."
         ),
-        installed_version="1.1.0",
+        installed_version=current_version,
         managed=True,
         state="active",
         channel=next_channel,
         update_available=True,
-        latest_version="1.2.0",
+        latest_version=next_version,
         staged=staged,
         media_mount="/media/operator/FLOORTERM",
-        rollback_version="1.0.0",
+        rollback_version=previous_version,
         history=history,
     )
     blocked = UpdateStatus(
@@ -201,7 +219,7 @@ def _snapshots():
             "The signed release channel is unreachable. Reporting and line "
             "response remain fully available; retry later or use an update drive."
         ),
-        installed_version="1.1.0",
+        installed_version=current_version,
         managed=True,
         state="active",
         channel_error="Release channel is unreachable",
@@ -223,12 +241,16 @@ def _settle(root, cycles=8):
 
 
 def _grab(app, root, image_grab, image_module, widget=None):
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.docs.screen_capture import capture_widget
+
     app.toast_until = 0
     app.render()
     _settle(root)
+    if app.error_panel or app.render_blocked:
+        raise RuntimeError("Documentation capture stopped: application UI reported an error")
     widget = widget or app.canvas
-    x = widget.winfo_rootx()
-    y = widget.winfo_rooty()
     width = widget.winfo_width()
     height = widget.winfo_height()
     if widget is app.canvas and (width, height) != CAPTURE_SIZE:
@@ -236,53 +258,7 @@ def _grab(app, root, image_grab, image_module, widget=None):
             f"native capture must be {CAPTURE_SIZE}, got {width}x{height}; "
             "use a display or Xvfb screen at least 1920x1200"
         )
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    if x < 0 or y < 0 or x + width > screen_width or y + height > screen_height:
-        raise RuntimeError(
-            "capture window lies outside the display: "
-            f"window={x},{y},{width}x{height}; screen={screen_width}x{screen_height}"
-        )
-    try:
-        image = image_grab.grab(bbox=(x, y, x + width, y + height))
-    except (OSError, subprocess.CalledProcessError) as exc:
-        # Raspberry Pi OS uses Wayland/labwc by default. Pillow can be built with
-        # X11 capture support yet still fail against the XWayland compatibility
-        # surface. ``grim`` is the native compositor capture utility and accepts
-        # an exact region, so it is a safe deterministic fallback.
-        grim = shutil.which("grim")
-        runtime = Path(f"/run/user/{os.getuid()}") if hasattr(os, "getuid") else None
-        if not grim or runtime is None or not runtime.is_dir():
-            raise RuntimeError(
-                "screen capture failed and no Wayland grim fallback is available"
-            ) from exc
-        environment = dict(os.environ)
-        environment.setdefault("XDG_RUNTIME_DIR", str(runtime))
-        environment.setdefault("WAYLAND_DISPLAY", "wayland-0")
-        with tempfile.TemporaryDirectory(prefix="floorterminal-grab-") as folder:
-            target = Path(folder) / "frame.png"
-            result = subprocess.run(
-                [grim, "-g", f"{x},{y} {width}x{height}", str(target)],
-                capture_output=True,
-                text=True,
-                check=False,
-                env=environment,
-            )
-            if result.returncode != 0 or not target.is_file():
-                detail = (result.stderr or result.stdout).strip()
-                raise RuntimeError(f"Wayland screen capture failed: {detail}") from exc
-            with image_module.open(target) as captured:
-                image = captured.copy()
-    # Upscaling cannot restore glyph edges or icon detail: capture native pixels.
-    image = image.convert("RGB")
-    if image.size != (width, height):
-        if image.width < width or image.height < height:
-            raise RuntimeError("screen capture returned fewer pixels than requested")
-        image = image.resize((width, height), image_module.Resampling.LANCZOS)
-    extrema = image.getextrema()
-    if not extrema or all(low == high for low, high in extrema):
-        raise RuntimeError("captured frame is blank")
-    return image
+    return capture_widget(widget, image_grab, image_module)
 
 
 def _save(image, output, name):
@@ -419,7 +395,14 @@ def generate(output: Path):
                 app.modal = None
                 set_update(name)
                 source = _grab(app, root, ImageGrab, Image)
-            crop = source.crop((1250, 0, 1360, 128))
+            # Header controls move with viewport width; never crop a fixed
+            # coordinate that might now contain the clock or a different icon.
+            app.modal = None
+            app.render()
+            box = app.hitboxes["software_update"]
+            scale = app.canvas.scale_factor
+            crop = source.crop(tuple(round(value * scale + (app.canvas.offset_x if index % 2 == 0 else app.canvas.offset_y))
+                                     for index, value in enumerate((box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4))))
             canvas = Image.new("RGB", (660, 168), "white")
             canvas.paste(crop, (20, 20))
             draw = ImageDraw.Draw(canvas)
@@ -493,7 +476,10 @@ def generate(output: Path):
         )
     finally:
         app.update_service.stop()
+        app.delivery.close()
         app.sound.close()
+        app.history.close(2)
+        app.logger.close(2)
         root.destroy()
         shutil.rmtree(runtime, ignore_errors=True)
 

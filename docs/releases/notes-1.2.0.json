@@ -1,0 +1,28 @@
+{
+  "release_title": "FloorTerminal 1.2.0",
+  "release_summary": "Local-first production response with independent station groups, operator self-fix and handover, flexible failure reasons, daily saved-team refresh, adaptive kiosk controls and safer offline updates.",
+  "minimum_upgradable_version": "1.0.0",
+  "features": [
+    "Independent production groups with group-only or whole-line stop propagation and concurrent responses",
+    "Operator self-fix with escalation to Engineering on the same incident",
+    "Per-station failure catalogues with automatic Others, touch paging and search",
+    "Daily idle-time roster refresh and a manual Settings refresh with offline saved names",
+    "Configurable request budgets, durable background delivery and standalone incident history",
+    "Adaptive fullscreen kiosk Settings, touch feedback and stable group/conveyor animation"
+  ],
+  "fixes": [
+    "Avoid repeated crew-directory requests and preserve cooldown deadlines across restarts",
+    "Retain operator decisions and queued updates through network loss and failed acknowledgements",
+    "Prevent animation item churn and unnecessary redraws beneath static dialogs",
+    "Keep short-screen station actions and Settings Save/Cancel controls reachable",
+    "Preserve complete directory pagination under small API budgets and reject ambiguous recipients",
+    "Keep connector data and newer configuration extensions during supported version changes"
+  ],
+  "security": [
+    "Bounded strict JSON, private state/checkpoints and hardened audit-file handling",
+    "Ambiguous writes require verified idempotency or explicit protected reconciliation",
+    "Read-only update compatibility checks refuse unsafe downgrades without deleting data",
+    "Software probation requires a healthy GUI before confirmation",
+    "Release bundles contain no real connector credentials, saved incidents or private signing material"
+  ]
+}

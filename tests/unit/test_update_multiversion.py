@@ -37,6 +37,11 @@ from .update_fixtures import (
 
 class MultipleReleaseTests(unittest.TestCase):
     def setUp(self):
+        # These are synthetic ELF headers, not executable future releases.
+        # Real subprocess/protocol refusal is covered by compatibility tests.
+        probe = mock.patch("floorterminal.update.compatibility.probe_target")
+        probe.start()
+        self.addCleanup(probe.stop)
         self.work = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.work, True)
         self.seed, self.key_id, anchor = make_key()

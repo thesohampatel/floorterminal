@@ -13,10 +13,11 @@ and exposes the active one through a single symbolic link::
         update/update-log.jsonl           append-only operator-visible update log
         config.json  connector.json  response_state.json  logs/   deployment data
 
-Deployment data lives beside the link and is never read, moved, or rewritten by an
-update. Switching versions therefore only replaces one symbolic link, which is a
-single atomic ``rename`` on POSIX: an interrupted update always leaves either the
-old slot or the new slot active, never a partially written executable.
+Deployment data lives beside the link. Compatibility checks inspect and privately
+checkpoint it without replacing connectors or operational state. Reviewed config
+extension recovery is separate from selecting an executable. The selection is a
+single atomic ``rename`` on POSIX: an interruption leaves either the old slot or
+the new slot active, never a partially written executable.
 """
 
 from __future__ import annotations
@@ -134,10 +135,18 @@ class InstallLayout:
         try:
             if not link.is_symlink():
                 return None
+            if self.versions_dir.is_symlink():
+                return None
             target = Path(os.readlink(link))
-            if not target.is_absolute():
-                target = (link.parent / target).resolve()
-            if _is_slot_executable(target):
+            target = (
+                target if target.is_absolute() else link.parent / target
+            ).resolve()
+            if (
+                _is_slot_executable(target)
+                and target.parent.parent == self.versions_dir.resolve()
+                and target.name == trust.EXECUTABLE_NAME
+                and not self.slot(target.parent.name).is_symlink()
+            ):
                 return target.parent.name
         except OSError:
             return None
@@ -151,5 +160,7 @@ class InstallLayout:
     def ensure_directories(self):
         """Create the update working directories with owner-only permissions."""
         for path in (self.versions_dir, self.update_dir, self.staging_dir):
+            if path.is_symlink():
+                raise OSError("Managed update directories must not be symbolic links")
             path.mkdir(parents=True, exist_ok=True, mode=0o700)
         return self

@@ -5,7 +5,9 @@ from __future__ import annotations
 import tkinter as tk
 from contextlib import contextmanager
 
+from .layout import Viewport
 from .raster import MAX_RASTER_PIXELS, RasterCache, rounded_rectangle_png
+from .scene import CanvasScene
 
 DESIGN_WIDTH = 800.0
 DESIGN_HEIGHT = 480.0
@@ -58,9 +60,16 @@ class ResponsiveCanvas(tk.Canvas):
         self.offset_x = 0.0
         self.offset_y = 0.0
         self.aa_backdrop = None
+        self.adaptive = False
         self._rgb_cache = {}
         self._mix_cache = {}
+        self._unmanaged_items = False
         super().__init__(master, **kwargs)
+        self.scene = CanvasScene(
+            lambda kind, coords, options: tk.Canvas._create(self, kind, coords, options),
+            self.coords, self.itemconfigure,
+            lambda item: tk.Canvas.delete(self, item), self.tag_raise,
+        )
         # Aqua already anti-aliases the canvas, and there an image would be
         # drawn at 1x on a Retina display, so pre-rendering is X11/Windows only.
         try:
@@ -71,6 +80,30 @@ class ResponsiveCanvas(tk.Canvas):
         self.raster = RasterCache(
             lambda data: tk.PhotoImage(master=self, data=data, format="png")
         )
+
+    def _create(self, itemType, args, kw):
+        if hasattr(self, "scene") and self.scene.active:
+            return self.scene.draw(itemType, args, kw)
+        self._unmanaged_items = True
+        return super()._create(itemType, args, kw)
+
+    def begin_frame(self):
+        if self._unmanaged_items:
+            # Static emergency drawing bypasses the scene. Clear it exactly
+            # once on recovery so fallback messages never remain underneath.
+            tk.Canvas.delete(self, "all")
+            self.scene.clear()
+            self._unmanaged_items = False
+        self.scene.begin()
+
+    def end_frame(self):
+        self.scene.end()
+
+    def delete(self, *args):
+        if "all" in args:
+            self.scene.clear()
+            self._unmanaged_items = False
+        return super().delete(*args)
 
     @contextmanager
     def surface(self, color):
@@ -88,6 +121,8 @@ class ResponsiveCanvas(tk.Canvas):
             return None
         cached = self._rgb_cache.get(color)
         if cached is None:
+            if len(self._rgb_cache) >= 1024:
+                self._rgb_cache.clear()
             try:
                 red, green, blue = self.winfo_rgb(color)
             except tk.TclError:
@@ -102,6 +137,8 @@ class ResponsiveCanvas(tk.Canvas):
             return None
         key = (color, backdrop, amount)
         if key not in self._mix_cache:
+            if len(self._mix_cache) >= 1024:
+                self._mix_cache.clear()
             first, second = self._rgb(color), self._rgb(backdrop)
             if first is None or second is None:
                 self._mix_cache[key] = None
@@ -155,7 +192,7 @@ class ResponsiveCanvas(tk.Canvas):
             backdrop,
         )
         try:
-            image = self.raster.get(
+            image = self.scene.current_raster(key) or self.raster.get(
                 key,
                 lambda: rounded_rectangle_png(
                     pixel_width,
@@ -166,6 +203,7 @@ class ResponsiveCanvas(tk.Canvas):
                     line,
                     backdrop,
                 ),
+                cost=pixel_width * pixel_height * 4,
             )
         except tk.TclError:
             # An image format problem must never stop the console from drawing.
@@ -175,11 +213,21 @@ class ResponsiveCanvas(tk.Canvas):
             return None
         tags = tuple(tags) if isinstance(tags, (list, tuple)) else (tags,)
         tags += ("ft-shape", "ft-filled" if fill_rgb else "ft-ring")
+        if self.scene.active:
+            return self.scene.draw(
+                "image", (left, top), {"image": image, "anchor": "nw", "tags": tags}, key
+            )
         return super().create_image(left, top, image=image, anchor="nw", tags=tags)
 
     def set_viewport(self, width, height):
         width = max(1.0, float(width))
         height = max(1.0, float(height))
+        if self.adaptive:
+            view = Viewport.from_pixels(width, height)
+            self.logical_width, self.logical_height = view.width, view.height
+            self.scale_factor = view.scale
+            self.offset_x = self.offset_y = 0.0
+            return
         self.scale_factor = design_scale(
             width, height, self.logical_width, self.logical_height
         )

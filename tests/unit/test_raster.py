@@ -4,6 +4,7 @@ import struct
 import unittest
 import zlib
 
+from floorterminal.ui.fields import chevron_png
 from floorterminal.ui.raster import RasterCache, rounded_rectangle_png
 
 BACKDROP = (243, 245, 249)
@@ -36,8 +37,20 @@ def decode(png):
 
 
 class RoundedRectangleTests(unittest.TestCase):
+    def test_field_chevrons_never_request_x11_partial_alpha_readback(self):
+        for size in (16, 24, 41, 64):
+            width, height, pixels = decode(chevron_png(size))
+            self.assertEqual((width, height), (size, size))
+            self.assertEqual({pixel[3] for row in pixels for pixel in row}, {0, 255})
+
     def test_every_size_encodes_exactly_including_odd_dimensions(self):
-        for width, height, radius in ((1, 1, 0.5), (9, 9, 4.5), (10, 7, 3), (33, 20, 16), (240, 60, 12)):
+        for width, height, radius in (
+            (1, 1, 0.5),
+            (9, 9, 4.5),
+            (10, 7, 3),
+            (33, 20, 16),
+            (240, 60, 12),
+        ):
             with self.subTest(size=(width, height)):
                 png = rounded_rectangle_png(
                     width, height, radius, (22, 163, 106), (200, 20, 40), 2, BACKDROP
@@ -53,7 +66,9 @@ class RoundedRectangleTests(unittest.TestCase):
 
     def test_corner_pixels_are_blended_toward_the_backdrop(self):
         fill = (22, 163, 106)
-        _w, _h, pixels = decode(rounded_rectangle_png(60, 60, 30, fill, None, 0, BACKDROP))
+        _w, _h, pixels = decode(
+            rounded_rectangle_png(60, 60, 30, fill, None, 0, BACKDROP)
+        )
         self.assertEqual(pixels[0][0][3], 0)
         self.assertEqual(pixels[30][30][:3], fill)
         edge = [

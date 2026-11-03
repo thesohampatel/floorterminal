@@ -44,7 +44,9 @@ Before production use, record evidence for every item:
    participant changes, completion, asset-state failure, and partial-capability
    behavior against a non-production integration.
 6. Validate every configured station, failure type, team, destination, asset,
-   location, escalation, retention period, locale, and screen resolution.
+   location, escalation, locale and actual display orientation/touch reach.
+   Review automatic audit-retention limits and the site's separate archival needs;
+   screen resolution and log reserve sizes are not operator configuration tasks.
 7. Test cold boot, power loss during each workflow state, corrupt state recovery,
    storage-low behavior, clock correction, network loss, process crash, and
    supervisor restart.

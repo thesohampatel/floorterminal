@@ -11,10 +11,44 @@ from __future__ import annotations
 
 import os
 
-from ..update import RESTART_EXEC, RESTART_UNSUPPORTED, ActivationError
+from ..update import RESTART_EXEC, RESTART_UNSUPPORTED
 
 
 class SoftwareUpdateMixin:
+    def version_trial_active(self):
+        service = getattr(self, "update_service", None)
+        return bool(service and service.status().state == "probation")
+
+    def version_change_blocker(self):
+        """Keep the saved snapshot stable until the new process takes ownership."""
+        if self.busy or getattr(self, "_version_change_pending", False):
+            return "Wait for the current operation to finish"
+        if any(
+            getattr(getattr(self, name, None), "active", False)
+            for name in ("delivery", "history")
+        ):
+            return "Wait for the background synchronization to finish, then retry"
+        state = self.state
+        if state.get("status") != "RUNNING" or state.get("parked_incidents"):
+            return "Finish all active responses and resume production before changing versions"
+        if any(
+            state.get(key)
+            for key in (
+                "delivery_outbox",
+                "pending_response_record",
+                "pending_planned_work",
+                "pending_response_status",
+                "pending_participant_assignment",
+                "pending_record_updates",
+                "pending_messages",
+                "asset_status_sync_pending",
+                "history_pending",
+                "history_links",
+            )
+        ):
+            return "Finish synchronization and resolve saved updates before changing versions"
+        return ""
+
     def stop_update_service(self):
         service = getattr(self, "update_service", None)
         if service is not None:
@@ -91,8 +125,9 @@ class SoftwareUpdateMixin:
         if action == "rollback" and not status.can_rollback:
             self.notify("No previous version is available on this terminal", "error", 6)
             return
-        if self.busy:
-            self.notify("Wait for the current operation to finish", "error", 6)
+        blocker = self.version_change_blocker()
+        if blocker:
+            self.notify(blocker, "error", 8)
             return
         page = self.modal.get("page", "status") if self.modal else "status"
         self.modal = None
@@ -114,14 +149,6 @@ class SoftwareUpdateMixin:
             "Identify the administrator to authorize this version change."
         )
         machine_status = self.state.get("status", "RUNNING")
-        if machine_status != "RUNNING":
-            # The terminal restores its exact workflow state after a restart, but
-            # an operator is entitled to know a restart is about to happen during
-            # a live event before authorizing it.
-            self.modal["prompt"] = (
-                f"The line is {machine_status}. Version {selected_version} restarts and resumes "
-                "this event. Identify the administrator to continue."
-            )
         self.logger.log(
             "software_update_authorization_requested",
             update_action=action,
@@ -137,29 +164,15 @@ class SoftwareUpdateMixin:
         if service is None or not status.can_install or not selection:
             self.notify("No verified update is ready to install", "error", 8)
             return
-        try:
-            result = service.install_staged(
+
+        def change():
+            return service.install_staged(
                 authorized_by=administrator,
                 expected_version=selection["version"],
                 expected_sha256=selection["sha256"],
             )
-        except (ActivationError, OSError) as exc:
-            self.logger.log(
-                "software_update_install_failed",
-                "ERROR",
-                error=str(exc),
-                administrator=administrator,
-            )
-            self.notify(f"Update not installed • {exc}", "error", 15)
-            return
-        self.logger.log(
-            "software_update_installed",
-            from_version=result.from_version,
-            to_version=result.to_version,
-            administrator=administrator,
-            machine_status=self.state.get("status"),
-        )
-        self.finish_version_change(result, f"Version {result.to_version} installed")
+
+        self.run_version_change(change, administrator)
 
     def restore_previous_version(self, administrator, selection=None):
         """Switch back to a previously installed version after authorization."""
@@ -168,35 +181,53 @@ class SoftwareUpdateMixin:
         if service is None or not status.can_rollback or not selection:
             self.notify("No previous version is available on this terminal", "error", 8)
             return
-        try:
-            result = service.rollback(
+
+        def change():
+            return service.rollback(
                 authorized_by=administrator, target=selection["version"]
             )
-        except (ActivationError, OSError) as exc:
+
+        self.run_version_change(change, administrator)
+
+    def run_version_change(self, change, administrator):
+        blocker = self.version_change_blocker()
+        if blocker:
+            self.notify(blocker, "error", 8)
+            return
+        self._version_change_pending = True
+
+        def work():
+            # A failed save must never occur AFTER the executable is selected.
+            self.save_state()
+            return change()
+
+        def failed(_error):
+            self._version_change_pending = False
+
+        def done(result):
             self.logger.log(
-                "software_update_rollback_failed",
-                "ERROR",
-                error=str(exc),
+                "software_version_changed",
+                from_version=result.from_version,
+                to_version=result.to_version,
                 administrator=administrator,
             )
-            self.notify(f"Version not restored • {exc}", "error", 15)
-            return
-        self.logger.log(
-            "software_update_rolled_back",
-            "WARNING",
-            from_version=result.from_version,
-            to_version=result.to_version,
-            administrator=administrator,
-            machine_status=self.state.get("status"),
-        )
-        self.finish_version_change(result, f"Version {result.to_version} restored")
+            self.finish_version_change(result, f"Version {result.to_version} selected")
+
+        if not self.perform(
+            "Checking saved data and preparing the version change…",
+            work,
+            done,
+            on_error=failed,
+            transactional=False,
+        ):
+            self._version_change_pending = False
 
     def finish_version_change(self, result, summary):
         """Persist state and hand control to the newly active version."""
         self.modal = None
-        self.save_state()
         mechanism = self.update_service.restart_mechanism()
         if mechanism == RESTART_UNSUPPORTED:
+            self._version_change_pending = False
             self.notify(
                 f"{summary} • restart this terminal to run it",
                 "success",
@@ -208,6 +239,10 @@ class SoftwareUpdateMixin:
                 reason="no supervisor and not a frozen application",
             )
             return
+        # No report, Settings save or background acknowledgement may race the
+        # version change during the short visible restart countdown.
+        self.busy = True
+        self.busy_message = "Restarting into the selected version…"
         self.notify(f"{summary} • restarting now", "success", 8)
         self.logger.log(
             "software_update_restart_scheduled",
@@ -234,6 +269,18 @@ class SoftwareUpdateMixin:
         """Announce a newly verified update drive without interrupting the workflow."""
         try:
             status = self.update_status()
+            trial = status.state == "probation"
+            if trial and not getattr(self, "_trial_announced", False):
+                self._trial_announced = True
+                self.open_update_panel("status", automatic=True)
+                self.notify(
+                    "Version health check • reporting resumes after confirmation",
+                    "info",
+                    10,
+                )
+            elif not trial and getattr(self, "_trial_announced", False):
+                self._trial_announced = False
+                self.notify("Version confirmed • reporting is ready", "success", 8)
             staged = status.staged.version if status.staged else ""
             if staged and staged != self.announced_update:
                 self.announced_update = staged
@@ -248,7 +295,11 @@ class SoftwareUpdateMixin:
                     "success",
                     20,
                 )
-                if not self.modal and not self.busy:
+                if (
+                    not self.modal
+                    and not self.busy
+                    and not getattr(self, "settings_visible", False)
+                ):
                     self.open_update_panel("changes", automatic=True)
             elif not staged and self.announced_update:
                 self.announced_update = ""
