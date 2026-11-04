@@ -4,9 +4,11 @@ import math
 import time
 from datetime import datetime
 
+from ..core.support import support_buttons
+from .contrast import readable_label
 from .conveyor import GROUP_COLORS, advance_motion, belt_point, station_slots
 from .group_view import GroupViewMixin
-from .layout import GAP, Viewport, split_row, station_capacity
+from .layout import GAP, Viewport, header_regions, split_row, station_capacity
 
 
 class KioskViewMixin(GroupViewMixin):
@@ -65,15 +67,36 @@ class KioskViewMixin(GroupViewMixin):
         x1, y1, x2, y2 = box
         fill = fill or "#EAF0F8"
         fg = fg or self.TEXT
-        offset = 1 if self.pressed == key else 0
+        pressed = self.pressed == key
+        released = getattr(self, "_released_control", None)
+        pulse = bool(
+            released and released[0] == key and time.monotonic() - released[1] < 0.16
+        )
+        if pressed:
+            fill = self.blend_color(fill, self.TEXT, 0.10)
+            x1, y1, x2, y2 = x1 + 1, y1 + 1, x2 - 1, y2 - 1
+        elif pulse:
+            fill = self.blend_color(fill, "#FFFFFF", 0.12)
+        if fg == "white":
+            fg = readable_label(fill, self.TEXT)
+        offset = 0
         border = self.BLUE if selected else "#B7C6D9"
-        self.rounded(x1, y1 + offset, x2, y2 + offset, 16, fill, border, 1)
+        self.rounded(
+            x1,
+            y1,
+            x2,
+            y2,
+            18,
+            fill,
+            self.BLUE if pressed or pulse else border,
+            2 if selected else 1,
+        )
         left, right = x1 + 12, x2 - 12
         if icon and x2 - x1 > 220:
             with self.surface(fill):
                 self.draw_button_icon(x1 + 25, (y1 + y2) / 2 + offset, icon, fg, 13)
             left += 36
-        size = 12 if y2 - y1 >= 56 else 10
+        size = 11 if y2 - y1 >= 56 else 10
         lines = self.wrap_lines(label, right - left, size, "bold")
         if len(lines) > 1:
             lines = [lines[0], self.fit_label(" ".join(lines[1:]), right - left, size)]
@@ -97,7 +120,25 @@ class KioskViewMixin(GroupViewMixin):
             )
         self.hitboxes[key] = box
 
+    @staticmethod
+    def blend_color(first, second, fraction):
+        values = [
+            round(
+                int(first[i : i + 2], 16) * (1 - fraction)
+                + int(second[i : i + 2], 16) * fraction
+            )
+            for i in (1, 3, 5)
+        ]
+        return "#" + "".join(f"{value:02x}" for value in values)
+
     def handle_layout_control(self, key):
+        if (
+            key.startswith("ui_about_")
+            and self.modal
+            and self.modal.get("kind") == "about"
+        ):
+            self.modal.update(about_page=key.removeprefix("ui_about_"), layout_page=0)
+            return
         if key == "ui_groups" or key.startswith("ui_group_"):
             self.group_control(key)
             return
@@ -337,7 +378,10 @@ class KioskViewMixin(GroupViewMixin):
                 (left, line_bottom + GAP, left + width, bottom), compact=True
             )
         else:
-            actions_height = 318 if view.stacked else 150
+            support_count = sum(
+                item["enabled"] for item in support_buttons(self.config)
+            )
+            actions_height = (150 + support_count * 56) if view.stacked else 150
             line_bottom = bottom - actions_height - GAP
             self.kiosk_line((left, top, left + width, line_bottom), phase)
             self.kiosk_actions((left, line_bottom + GAP, left + width, bottom))
@@ -349,15 +393,15 @@ class KioskViewMixin(GroupViewMixin):
             x, y, started = touch
             age = time.monotonic() - started
             if age < 0.24:
-                radius = 8 + 10 * age / 0.24
+                radius = 5 + 7 * age / 0.24
                 self.canvas.create_oval(
                     x - radius,
                     y - radius,
                     x + radius,
                     y + radius,
                     fill="",
-                    outline=self.BLUE,
-                    width=2,
+                    outline=self.blend_color(self.BLUE, self.BG, age / 0.24),
+                    width=1.5,
                 )
             else:
                 self.touch_feedback = None
@@ -365,8 +409,8 @@ class KioskViewMixin(GroupViewMixin):
     def kiosk_header(self):
         w = self.viewport().width
         self.canvas.create_rectangle(0, 0, w, 62, fill=self.CARD, outline="")
-        right = w - 12
-        boxes = split_row((right - 160, 7, right, 55), 3)
+        controls, clock, title_right, _feedback_right = header_regions(w)
+        boxes = split_row(controls, 3)
         self.draw_update_indicator(boxes[0])
         for key, box in (("about", boxes[1]), ("settings", boxes[2])):
             self.kiosk_button(key, box, "")
@@ -395,25 +439,31 @@ class KioskViewMixin(GroupViewMixin):
                         fill=self.BLUE,
                         outline="",
                     )
-        title_right = right - 172
         x = 14
         if title_right > 240 and self.draw_brand_mark(30, 31, 34):
             x = 56
         self.row_label((x, 8, title_right, 26), "FLOORTERMINAL", 8, self.BLUE)
         self.row_label((x, 27, title_right, 54), self.config["line_name"], 15)
-        if w > 760:
-            self.text(
-                title_right - 8,
-                18,
-                datetime.now().astimezone().strftime("%H:%M"),
-                10,
-                self.MUTED,
-                "normal",
-                "e",
-            )
+        self.draw_digital_clock(clock)
+
+    def draw_digital_clock(self, box):
+        a, b, c, d = box
+        self.rounded(a, b, c, d, 14, "#EDF3FC", "#DCE6F5")
+        self.row_label(
+            (a + 6, b + 1, c - 6, b + 14), "LOCAL TIME", 7, self.MUTED, anchor="center"
+        )
+        self.canvas.create_text(
+            (a + c) / 2,
+            (b + 14 + d) / 2,
+            text=datetime.now().astimezone().strftime("%H:%M:%S"),
+            font=("Courier", 17, "bold"),
+            fill=self.TEXT,
+            anchor="center",
+        )
 
     def kiosk_feedback(self):
         w = self.viewport().width
+        right = header_regions(w)[3]
         syncing = bool(getattr(getattr(self, "delivery", None), "active", None))
         busy = self.busy and getattr(self, "busy_message", "")
         toast = time.monotonic() < self.toast_until
@@ -459,7 +509,7 @@ class KioskViewMixin(GroupViewMixin):
                     "Standalone reporting • saved on this terminal • no external delivery",
                     self.GREEN,
                 )
-        self.rounded(12, 64, w - 12, 104, 12, "#F0F4FA", self.BORDER)
+        self.rounded(12, 64, right, 104, 12, "#F0F4FA", self.BORDER)
         if busy or syncing:
             self.canvas.create_arc(
                 24,
@@ -474,13 +524,13 @@ class KioskViewMixin(GroupViewMixin):
             )
         else:
             self.canvas.create_oval(28, 80, 36, 88, fill=accent, outline="")
-        self.row_label((52, 64, w - 24, 104), message, 9, self.TEXT, "normal")
+        self.row_label((52, 64, right - 12, 104), message, 9, self.TEXT, "normal")
         if not busy and not toast and self.has_queued_sync():
             self.hitboxes[
                 "ui_delivery" if getattr(self, "delivery", None) else "sync_pending"
-            ] = (12, 60, w - 12, 108)
+            ] = (12, 60, right, 108)
         elif busy or toast:
-            self.hitboxes["ui_feedback"] = (12, 60, w - 12, 108)
+            self.hitboxes["ui_feedback"] = (12, 60, right, 108)
 
     def kiosk_line(self, box, phase):
         x1, y1, x2, y2 = box
@@ -888,6 +938,7 @@ class KioskViewMixin(GroupViewMixin):
     def kiosk_actions(self, box, compact=False):
         x1, y1, x2, _y2 = box
         status = self.state["status"]
+        has_support = any(item["enabled"] for item in support_buttons(self.config))
         selected = bool(self.selected_zones())
         pending = status == "DOWN" and (
             self.state.get("pending_response_record")
@@ -937,13 +988,13 @@ class KioskViewMixin(GroupViewMixin):
         stacked = self.viewport().stacked or compact
         if self.operator_resolving():
             guide = "Same incident • complete safely or hand over to Engineering"
-        primary_right = x2 if stacked else x1 + (x2 - x1) * 0.62
+        primary_right = x2 if stacked or not has_support else x1 + (x2 - x1) * 0.62
         self.row_label(
             (x1 + 4, y1, primary_right - 4, y1 + 28), guide, 9, self.TEXT, "normal"
         )
         y1 += 32
         primary_height = 52 if compact else 60
-        if compact:
+        if compact and has_support:
             primary_right = x2 - 120
         self.kiosk_button(
             "primary",
@@ -953,7 +1004,7 @@ class KioskViewMixin(GroupViewMixin):
             icon,
             self.label_color(color, "white"),
         )
-        if compact:
+        if compact and has_support:
             self.kiosk_button(
                 "ui_support", (x2 - 112, y1, x2, y1 + primary_height), "Support"
             )
@@ -994,7 +1045,7 @@ class KioskViewMixin(GroupViewMixin):
                 "+",
                 self.BLUE,
             )
-        if compact:
+        if compact or not has_support:
             return
         if stacked:
             self.kiosk_support(
@@ -1010,21 +1061,16 @@ class KioskViewMixin(GroupViewMixin):
             )
 
     def kiosk_support(self, boxes, modal=False):
-        for (label, key, color, icon), box in zip(
-            (
-                (self.t("engineering"), "engineering", self.BLUE, "E"),
-                (self.t("quality"), "quality", self.PURPLE, "Q"),
-                (self.t("production"), "production", self.ORANGE, "PROD"),
-            ),
-            boxes,
-        ):
-            if self.provider.INFO.supports_messaging:
+        buttons = [item for item in support_buttons(self.config) if item["enabled"]]
+        for button, box in zip(buttons, boxes):
+            label, key = button["label"], button["key"]
+            if self.provider.INFO.supports_messaging and button["destination"].strip():
                 self.kiosk_button(
                     ("ui_call_" if modal else "") + key,
                     box,
-                    "CALL " + label,
+                    "Call " + label,
                     "#EAF0F8",
-                    icon,
+                    "CALL",
                     self.TEXT,
                 )
             else:

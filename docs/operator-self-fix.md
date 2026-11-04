@@ -25,10 +25,10 @@ Always follow site training, guarding, isolation and escalation procedures first
 The selected stations, failures, name, category and duration remain in the report.
 An operator-only completion needs no Engineering name or team assignment.
 
-Native screen references: [response choice](images/v1.2.0/self-fix/operator-response-choice.png)
-and [optional name/start confirmation](images/v1.2.0/self-fix/operator-response-setup.png).
+Native screen references: [response choice](images/v1.2.1/self-fix/operator-response-choice.png)
+and [optional name/start confirmation](images/v1.2.1/self-fix/operator-response-setup.png).
 
-![Active operator self-fix on a native 800×480 kiosk](images/v1.2.0/self-fix/operator-response-active.png)
+![Active operator self-fix on a native 800×480 kiosk](images/v1.2.1/self-fix/operator-response-active.png)
 
 ## If help becomes necessary
 
@@ -47,7 +47,7 @@ The report keeps the operator response interval and Engineering participation.
 An unanswered-help escalation waits from the Engineering request, not the earlier
 self-fix start. Repeated help touches do not enqueue another request.
 
-![Same-incident response choices](images/v1.2.0/self-fix/operator-response-handover.png)
+![Same-incident response choices](images/v1.2.1/self-fix/operator-response-handover.png)
 
 ## Categories, timers and external capabilities
 

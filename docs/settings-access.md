@@ -14,7 +14,7 @@ controls. Merely compiling or hashing a publicly known password does not make it
 
 ## Change it from the touchscreen
 
-![Administrator access in the System tab](images/v1.2.0/settings-access.png)
+![Administrator access in the System tab](images/v1.2.1/settings-access.png)
 
 1. Open the sliders/Settings button on the main screen.
 2. Enter your administrator name or ID, then the current Settings password.
@@ -26,7 +26,17 @@ controls. Merely compiling or hashing a publicly known password does not make it
 
 All password stages are masked. Touch keys or a physical keyboard can be used.
 
-![Protected password change using the touch keyboard](images/v1.2.0/settings-password.png)
+In **v1.2.1**, the touch keyboard uses number/QWERTY rows and a
+separate **#+=** symbol layout. **Letters** returns to letters/numbers;
+**ABC / abc** changes case and **Delete** removes the last character. Short/narrow
+screens use balanced key rows and explicit pages without shrinking touch targets.
+These layout changes do not change masking, password validation or authorization.
+The screenshots below show v1.2.1.
+
+The [v1.2.1 release notes](releases/v1.2.1.md) explain these changes;
+the [current gallery](images/README.md) shows landscape and portrait layouts.
+
+![Protected password change using the touch keyboard](images/v1.2.1/settings-password.png)
 
 Fresh authorization expires after five minutes. Mismatches do not change access.
 Cancel leaves the existing password and other unsaved Settings edits unchanged.

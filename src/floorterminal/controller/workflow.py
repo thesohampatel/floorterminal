@@ -18,6 +18,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+from ..core.support import support_buttons
 from ..storage.state import (
     MAX_QUEUED_MESSAGES,
     MAX_QUEUED_RECORD_UPDATES,
@@ -210,7 +211,11 @@ class WorkflowMixin:
                             )
                 if members:
                     self.show_engineer_picker(
-                        {"members": members, "team_id": cached["team_id"], "context": context}
+                        {
+                            "members": members,
+                            "team_id": cached["team_id"],
+                            "context": context,
+                        }
                     )
                     self.modal["cached_at"] = cached["saved_at"]
                     return
@@ -218,9 +223,11 @@ class WorkflowMixin:
                 "kind": "offline_crew",
                 "context": context,
                 "message": (
-                    "The saved team list contains no selectable members. " if cached else
-                    "A verified team list is not cached for this connection. "
-                ) + "Refresh it, or continue without names and update the crew later. No participant will be invented.",
+                    "The saved team list contains no selectable members. "
+                    if cached
+                    else "A verified team list is not cached for this connection. "
+                )
+                + "Refresh it, or continue without names and update the crew later. No participant will be invented.",
             }
             # First use bootstraps once. Empty, stale or failed lists never cause
             # another API read merely because the operator reopens this screen.
@@ -2105,12 +2112,20 @@ class WorkflowMixin:
         return "MICRO-STOP" if int(seconds) <= threshold else "DOWNTIME EVENT"
 
     def call_team(self, name):
+        slot = name.lower()
+        button = next(
+            (item for item in support_buttons(self.config) if item["key"] == slot), None
+        )
+        if not button or not button["enabled"]:
+            self.notify("This support shortcut is disabled", "info", 4)
+            return
+        name, chat_name = button["label"], button["destination"].strip()
+
         def action():
             if not self.provider.connected:
                 raise RuntimeError("Configure and enable connector.json")
             if not self._supports("supports_messaging"):
                 raise RuntimeError("Messaging is not provided by connector.json")
-            chat_name = str(self.config.get(name.lower() + "_chat_name", "")).strip()
             if not chat_name:
                 raise RuntimeError(
                     f"No {name} chat is configured • set it in Settings → Connector"
@@ -2156,10 +2171,10 @@ class WorkflowMixin:
             self.log_event(
                 f"{name} support called",
                 {
-                    "Engineering": self.BLUE,
-                    "Quality": self.PURPLE,
-                    "Production": self.ORANGE,
-                }[name],
+                    "engineering": self.BLUE,
+                    "quality": self.PURPLE,
+                    "production": self.ORANGE,
+                }[slot],
             )
             self.save_state()
             outcome = self.flush_messages().get(entry["id"], "queued")

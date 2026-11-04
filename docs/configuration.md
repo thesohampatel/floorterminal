@@ -31,6 +31,30 @@ without forcing operators to make an unsupported diagnosis.
 
 ## Workflow and destinations
 
+### Configurable support shortcuts — v1.2.1
+
+Protected **Settings → Connector → Home support button 1–3** controls the three
+manual help slots independently from automatic notifications and incident routing.
+`support_buttons` is either `null` (legacy labels/chat destinations) or exactly
+three objects; `enabled` controls whether each slot is shown. For example:
+
+```json
+"support_buttons": [
+  {"label": "Maintenance team", "destination": "Maintenance help", "enabled": true},
+  {"label": "Quality technician", "destination": "Quality support", "enabled": true},
+  {"label": "Production supervisor", "destination": "Line supervisor", "enabled": true}
+]
+```
+
+This is a configuration fragment, not a connector or complete deployment file.
+Labels allow 1–48 printable characters; destinations allow up to 120. Missing
+messaging capability or a blank destination makes an enabled shortcut unavailable.
+Disabling all slots removes the support entry. Selection/incident state is not
+changed. Requests already queued retain their original destination and message.
+[Detailed behavior and migration](releases/v1.2.1.md).
+
+### Incident and automatic notification routing
+
 Timing values control escalation, micro-stop classification, animation, and refresh
 behavior and are bounded by validation. Team/conversation values are deployment
 labels resolved through connector mappings. Templates accept documented placeholders

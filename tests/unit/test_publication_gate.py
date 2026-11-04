@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
@@ -20,6 +21,33 @@ SPEC.loader.exec_module(gate)
 
 
 class PublicationGateTests(unittest.TestCase):
+    def setUp(self):
+        # Use the newest finalized catalogue; a future development preview must
+        # not prevent regression checks for already finalized release metadata.
+        if self._testMethodName in {
+            "test_current_catalog_matches_release_notes_and_current_capabilities",
+            "test_announced_release_rejects_development_wording",
+            "test_release_catalog_requires_a_real_timestamp",
+            "test_release_catalog_cannot_disagree_with_reviewed_notes",
+            "test_release_catalog_requires_useful_unique_touch_sized_capabilities",
+        }:
+            entry = next(item for item in gate.catalog.CATALOG if item.released_utc)
+            for patch in (
+                mock.patch.object(gate, "__version__", entry.version),
+                mock.patch.object(gate.catalog, "installed_entry", return_value=entry),
+                mock.patch.object(
+                    gate.catalog, "installed_features", return_value=entry.features
+                ),
+            ):
+                patch.start()
+                self.addCleanup(patch.stop)
+
+    def test_development_catalog_cannot_be_published_as_a_release(self):
+        entry = gate.catalog.installed_entry()
+        preview = replace(entry, title="Development preview", released_utc="")
+        with self.assertRaisesRegex(gate.AuditError, "development-preview"):
+            gate.check_release_catalog(ROOT, preview)
+
     def test_current_catalog_matches_release_notes_and_current_capabilities(self):
         gate.check_release_catalog(ROOT)
         features = " ".join(gate.catalog.installed_features()).lower()

@@ -5,6 +5,22 @@ retain their original development context; see [release verification](verificati
 for the final acceptance evidence and limitations.
 No graphics framework or new runtime dependency is required.
 
+## v1.2.1: bounded touch refinement
+
+The new digital clock changes once per second inside a reserved card. Equal-size
+failure grids and keyboard rows are calculated from available content space, with
+only the visible page rendered. Press/release feedback uses the existing single
+canvas animation chain; native Settings buttons have at most one short release
+callback, cancelled on destruction. Existing image-cache bounds remain in place.
+No full-screen alpha animation, live remote font/icon fetch, or per-button endless
+timer is added. The additional support settings are built behind the existing
+cooperative Settings loading cover.
+
+The new offline real-Tk regression is `tests/unit/refinement_ui_driver.py`; it
+checks compact, portrait and landscape layouts, all 68 number/uppercase/symbol
+characters, case/delete, failure multi-selection and informational pages. Run only
+on an idle test display; it blocks sockets and uses temporary runtime data.
+
 ## Animation and panel redraw fixes — 29 October 2026
 
 The physical panel reproduced a slowdown after animation boundaries even though
@@ -289,11 +305,11 @@ fixtures, not mockups or evidence of a live external-service connection. See the
 [gallery provenance](images/README.md). Longer forms use touch paging and optional
 scrolling; the Save/Cancel footer stays visible.
 
-![Rounded in-window Settings](images/v1.2.0/settings-line.png)
+![Rounded in-window Settings](images/v1.2.1/settings-line.png)
 
-![Configurable application request budget](images/v1.2.0/settings-connector.png)
+![Configurable application request budget](images/v1.2.1/settings-connector.png)
 
-![Station-specific failure editor](images/v1.2.0/settings-stations.png)
+![Station-specific failure editor](images/v1.2.1/settings-stations.png)
 
 ## Background-delivery verification — 21 October 2026
 

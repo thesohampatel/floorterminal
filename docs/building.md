@@ -2,10 +2,10 @@
 
 ## Repository files and release versions
 
-**The current published application is v1.2.0.** GitHub shows the last commit that
+**The current published application is v1.2.1.** GitHub shows the last commit that
 changed each file or folder. An installer, icon or service template can therefore
 show an older commit titled “FloorTerminal 1.0.0” while remaining the correct file
-for v1.2.0. A new release includes every required file, including unchanged ones.
+for v1.2.1. A new release includes every required file, including unchanged ones.
 Those last-change labels are not independently installed component versions.
 
 The application version is declared in `pyproject.toml` and
@@ -13,7 +13,7 @@ The application version is declared in `pyproject.toml` and
 The builder writes that value to the runtime bundle's `VERSION` file, and
 `packaging/linux/install.sh` reads it instead of hardcoding a release number.
 The [signed channel](../update-channel/latest.json), release hashes and
-[release notes](releases/v1.2.0.md) identify the current delivered build.
+[release notes](releases/v1.2.1.md) identify the current delivered build.
 
 Documentation may be improved on `main` after a binary release without rebuilding
 or retagging that executable. Its private build-input manifest establishes which

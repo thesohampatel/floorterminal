@@ -65,6 +65,7 @@ DEFAULT_CONFIG = {
     },
     "zones": list(DEFAULT_ZONES),
     "station_groups": [],
+    "support_buttons": None,
     "response_record_priority": "HIGH",
     "response_record_type": "REACTIVE",
     "planned_work_priority": "MEDIUM",
@@ -112,6 +113,7 @@ CONFIG_KEYS = (
     "asset_id",
     "zones",
     "station_groups",
+    "support_buttons",
     "engineering_team_name",
     "engineering_chat_name",
     "quality_chat_name",
@@ -363,6 +365,12 @@ def validate_directory_names(config):
 def validate_config(config):
     """Validate every operator-editable production setting."""
     validate_station_failures(config)
+    from .support import validate_support_buttons
+
+    try:
+        validate_support_buttons(config.get("support_buttons"))
+    except ValueError as exc:
+        raise ConfigurationError(str(exc)) from exc
     if config.get("reporting_mode", "connected") not in {"connected", "local"}:
         raise ConfigurationError("reporting_mode must be connected or local")
     from .topology import validate_groups

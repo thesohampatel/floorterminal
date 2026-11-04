@@ -151,6 +151,7 @@ def main():
         ("failures", "variable_failure_ui_driver"),
         ("delivery", "delivery_ui_driver"),
         ("controls", "experience_ui_driver"),
+        ("refinements", "refinement_ui_driver"),
     ):
         commands.append(
             (folder, [f"tests/unit/{driver}.py", "--capture", str(output / folder)])

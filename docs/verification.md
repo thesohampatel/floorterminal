@@ -1,5 +1,85 @@
 # Release verification
 
+## v1.2.1 release verification — 4 November 2026
+
+The native ARM64 release was built on Raspberry Pi 5 / 64-bit Raspberry Pi OS
+(Debian 13, glibc 2.41), Python 3.13.5 / Tk 8.6, with PyInstaller 6.21.0.
+
+- **755 offline tests pass with zero skips** on the real Pi graphical session
+  before compilation. The macOS source run passes with 28 graphical skips, covered
+  by the Pi run. Ruff 0.17.3 and the source-matched artifact audit pass.
+- The delivered **14-file installation bundle** contains no source, logs, saved
+  incidents, enabled connector or live credentials. The four public downloads
+  comprise installation/update archives and their two SHA-256 sidecars. Package
+  and channel signatures verify against the pinned public key; signing is local
+  and the private key never enters the Pi, repository or release assets.
+- The **compiled executable** passes native 1920×1200 fullscreen animation,
+  Information, protected Settings, return-to-main and the finalized Version panel.
+  Actual X input completes two standalone incident cycles. An abrupt process
+  restart retains the original self-fix incident and start time; Engineering
+  handover continues that incident. No application/callback/save errors occur.
+- An actual **v1.2.0 → v1.2.1 → v1.2.0 → v1.2.1** executable round trip passes
+  authenticated activation, compatibility probes and rollback in disposable
+  managed storage. Both connector files remain byte-identical. The published
+  v1.2.0 Settings writer preserves unknown configuration fields, including the
+  new support shortcuts, while a changed line name survives the return upgrade.
+  This is not a claim that arbitrary manual deletion of configuration is repaired.
+- The [native gallery manifest](images/v1.2.1/manifest.json) binds **135 media
+  assets** to the finalized source input digest, including keyboard, failure-card,
+  support-button, Information and Update checks at compact, portrait and large
+  sizes. Update-availability examples use explicitly illustrative service
+  snapshots; they do not announce any hypothetical next version.
+- No real third-party API/account or production installation is used. The
+  existing kiosk executable, service/autostart and runtime data stay untouched.
+  Physical power loss, gloves/fingers, site connector commissioning and multi-month
+  endurance remain deployment acceptance work; passing tests are not a guarantee
+  of zero defects or vulnerabilities.
+
+Build ID: `bf992748-75f9-4db4-a6d6-ee2f26bba990`.
+Source-input SHA-256:
+`1c77b8d96008591181be031b7936a9de753f5cbf91322afcecbec6dd0340b4f6`.
+Executable SHA-256:
+`16dacdc09dcafb69918f2b298473b633950adbb58c8ad5431e48204d7f49fddd`.
+
+## v1.2.1 pre-release interface measurements — 4 November 2026
+
+The following short measurements were collected before release metadata was
+finalized. They cover the same interface implementation, not a long-running
+production installation. Earlier-version evidence below remains historical.
+
+- **755 offline tests pass with zero skips** on the ARM64 touchscreen kiosk Pi,
+  using its real Tk graphical session and disposable runtime data. This includes
+  adaptive screen geometry, incident/group workflows, Settings saves, update
+  compatibility and the new touch-refinement regressions.
+- The macOS development run also passes **755 tests, with 28 graphical skips**
+  in its non-graphical test environment. Those skips are covered by the native Pi
+  run; they are not presented as successful macOS graphical tests.
+- A dedicated real-Tk driver checks 320×400, 800×480, 480×800 and 1920×1200:
+  reserved clock bounds, all 68 uppercase/digit/punctuation keys, case/delete,
+  equal-size failure grids, optional multi-selection, Information tabs and Update
+  layout. It saves custom support settings through the real Settings writer and
+  verifies enabled/disabled controls and dispatch. Network connections are denied.
+- The compact default five-choice failure sheet remains on one screen and the
+  existing short reporting/arrival/completion/crew paths pass. Arbitrary larger
+  catalogues still use bounded paging/search without losing selections.
+- Ruff **0.17.3** and the offline source/publication audit pass. Gitleaks finds
+  no secrets in the development source snapshot. The signed channel remains at
+  v1.2.0; release gates still reject development wording in an announced build.
+- A short native **1920×1200 fullscreen** sample draws 301 frames in ten seconds,
+  with **3.34 ms p95 render-call time**, a **23.84 ms maximum nominal 20-ms
+  heartbeat gap** and 10.6% process CPU. A static dialog draws only two frames
+  in two seconds. These are event-loop measurements, not physical touch latency.
+- Settings gives initial feedback after **77 ms** and finishes first construction
+  after **886 ms**, with a 153 ms maximum construction-time event gap. A loading
+  cover hides partially constructed forms; first-open latency is still measurable.
+- Grouped scenes render **1,000 measured frames** at each of 800×480 and
+  1920×1200. No canvas items are recreated after warm-up; RSS growth is 16 KiB in
+  each run, with raster caches around 9.3 and 13.5 MiB. This bounded-resource
+  sample is not a multi-month endurance or memory-leak guarantee.
+- No external service/API, private signing key, production runtime file, installed
+  kiosk executable or system service is changed by these checks. Passing tests
+  are not a guarantee of defect-free software or a substitute for site acceptance.
+
 ## 1.2.0 — corrected distribution verification
 
 The owner approved a same-version reissue on **3 November 2026** to correct stale

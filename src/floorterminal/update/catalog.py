@@ -26,6 +26,36 @@ class CatalogEntry:
 
 CATALOG = (
     CatalogEntry(
+        version="1.2.1",
+        released_utc="2026-11-04T14:47:02Z",
+        title="FloorTerminal 1.2.1",
+        summary=(
+            "Refined kiosk interaction with a dedicated seconds clock, balanced "
+            "touch keyboard, consistent failure choices, configurable support "
+            "shortcuts and clearer information and update pages."
+        ),
+        features=(
+            "Dedicated HH:MM:SS local clock on every kiosk layout",
+            "QWERTY touch keyboard with separate symbols",
+            "Equal-size failure cards and fixed selection toolbar",
+            "Three configurable message-only support shortcuts",
+            "Consistent press feedback and information pages",
+            "Independent groups and concurrent local-first incidents",
+            "Operator self-fix, handover and durable delivery",
+            "Signed offline updates and private recovery state",
+            "Daily saved-team refresh and offline crew selection",
+            "Private incident history and standalone reporting",
+            "Automatic bounded storage care and device checks",
+            "Configurable rolling-minute application request budget",
+            "Connector v1 mappings and independent capabilities",
+            "Atomic line release with durable, retried follow-ups",
+            "Protected review of uncertain external writes",
+            "Retained canvas rendering with bounded image caching",
+            "Portrait/landscape reflow and touch-sized station pages",
+            "Connector-preserving updates and compatibility checks",
+        ),
+    ),
+    CatalogEntry(
         version="1.2.0",
         released_utc="2026-11-04T00:14:07Z",
         title="FloorTerminal 1.2.0",

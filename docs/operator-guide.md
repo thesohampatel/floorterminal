@@ -7,7 +7,7 @@ other active groups. The group overview explains each group's configured impact.
 
 Site safety and escalation procedures always take precedence over this console.
 
-## Display layout in v1.2.0
+## Display layout in v1.2.1
 
 The interface adapts to your kiosk window automatically. Portrait screens stack
 actions; short screens keep the station map and workflow actions together.
@@ -28,6 +28,8 @@ required. [Display behavior and commissioning](adaptive-kiosk.md).
 - **Header:** application/line identity, software update, Information and Settings.
   The clock appears when width allows; connector state and messages use the
   dedicated feedback band in v1.2.0.
+  In v1.2.1, a dedicated `HH:MM:SS` card is always visible: in the
+  header on wide screens, or beside the feedback band on narrow screens.
 - **Status:** redundant face/glyph, text, description, border, color, and motion.
 - **Production map:** stations, conveyor, failure selector, whole-line selection.
 - **Guidance:** the next valid action for the current workflow state.
@@ -107,6 +109,12 @@ The responder list is an operational participation record, not attendance,
 timekeeping, payroll, or shift reporting.
 
 ## Support and planned work
+
+**v1.2.1:** the three home support shortcuts can be renamed, assigned
+different chat/person destinations or hidden in protected Settings → Connector.
+Use the label shown on your terminal. These shortcuts do not change incident
+assignment, automatic notifications or station/group impact.
+[Administrator setup](releases/v1.2.1.md#choose-the-home-screen-support-buttons).
 
 Support controls send contextual messages and do not create response records. If
 the connector's request budget is momentarily exhausted, the request is queued and
