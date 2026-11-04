@@ -228,7 +228,38 @@ class OperatorViewMixin(KioskViewMixin, AdaptiveDialogMixin, UpdateViewMixin):
         """Draw crisp font-independent action symbols with a text fallback."""
         scale = radius / 17
         stroke = max(1, round(2 * scale))
-        if icon in {"OK", "✓"}:
+        if icon == "CALL":
+            self.rounded(
+                cx - 10 * scale,
+                cy - 8 * scale,
+                cx + 10 * scale,
+                cy + 5 * scale,
+                5 * scale,
+                "",
+                color,
+                stroke,
+            )
+            self.canvas.create_line(
+                cx - 5 * scale,
+                cy + 5 * scale,
+                cx - 5 * scale,
+                cy + 10 * scale,
+                cx + 1 * scale,
+                cy + 5 * scale,
+                fill=color,
+                width=stroke,
+                joinstyle="round",
+            )
+            for dx in (-5, 0, 5):
+                self.canvas.create_oval(
+                    cx + (dx - 1) * scale,
+                    cy - 2 * scale,
+                    cx + (dx + 1) * scale,
+                    cy,
+                    fill=color,
+                    outline="",
+                )
+        elif icon in {"OK", "✓"}:
             self.canvas.create_line(
                 cx - 7 * scale,
                 cy,

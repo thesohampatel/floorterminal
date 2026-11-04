@@ -1,17 +1,26 @@
-# FloorTerminal v1.2.0 — interface gallery
+# FloorTerminal v1.2.1 — interface gallery
 
-These images show the **released v1.2.0 application**, regenerated on a Raspberry Pi 5
-on **3 November 2026**. They are native captures of real application widgets with
+These images show the **released v1.2.1 application**, regenerated on a Raspberry Pi 5
+on **4 November 2026**. They are native captures of real application widgets with
 disposable offline examples, not design mockups or edited application screens.
-The [image manifest](v1.2.0/manifest.json) records source identity, dimensions,
-frame counts and SHA-256 hashes. Every current guide uses this versioned gallery;
-earlier development captures have been removed from the current documentation.
+The [image manifest](v1.2.1/manifest.json) records source identity, dimensions,
+frame counts and SHA-256 hashes. Stable-release guides use this versioned gallery.
+Historical v1.2.0 media remains in its own versioned directory.
+
+## Refined everyday controls
+
+[Dedicated seconds clock](v1.2.1/refinements/main-800x480.png) ·
+[Landscape keyboard](v1.2.1/refinements/keyboard-800x480.png) ·
+[Portrait keyboard](v1.2.1/refinements/keyboard-480x800.png) ·
+[Symbol layout](v1.2.1/refinements/symbols-800x480.png) ·
+[Equal-size failure cards](v1.2.1/refinements/failure-grid-800x480.png) ·
+[Customized support buttons](v1.2.1/refinements/custom-support-1920x1200.png).
 
 ## Independent station groups
 
-![Running, stopped and responding groups](v1.2.0/group-console.png)
+![Running, stopped and responding groups](v1.2.1/group-console.png)
 
-![Group-specific conveyor animation](v1.2.0/group-motion.webp)
+![Group-specific conveyor animation](v1.2.1/group-motion.webp)
 
 Each group has its own border, stations, status and conveyor segment. A running
 group keeps moving while other groups are stopped or responding. The rendered
@@ -20,48 +29,48 @@ scene is illustrative; it is not a live factory record.
 
 ## Report, respond and resume
 
-![Station choice and report actions](v1.2.0/station-failure-selection.png)
+![Station choice and report actions](v1.2.1/station-failure-selection.png)
 
-![Engineering report and response walkthrough](v1.2.0/operator-walkthrough.webp)
+![Engineering report and response walkthrough](v1.2.1/operator-walkthrough.webp)
 
-[Station selection](v1.2.0/operator-console.png) ·
-[Awaiting response](v1.2.0/line-interrupted.png) ·
-[Repair in progress](v1.2.0/response-in-progress.png) ·
-[Quick crew selection](v1.2.0/touch/crew-800x480.png).
+[Station selection](v1.2.1/operator-console.png) ·
+[Awaiting response](v1.2.1/line-interrupted.png) ·
+[Repair in progress](v1.2.1/response-in-progress.png) ·
+[Quick crew selection](v1.2.1/touch/crew-800x480.png).
 
 ## Operator self-fix and handover
 
-![Operator self-fix](v1.2.0/self-fix/operator-response-active.png)
+![Operator self-fix](v1.2.1/self-fix/operator-response-active.png)
 
-[Response choice](v1.2.0/self-fix/operator-response-choice.png) ·
+[Response choice](v1.2.1/self-fix/operator-response-choice.png) ·
 [Short reporting path](../operator-touch-flow.md) · [Self-fix safety and escalation](../operator-self-fix.md).
 
 ## Fullscreen settings and current release information
 
-![Current Settings interface](v1.2.0/settings-line.png)
+![Current Settings interface](v1.2.1/settings-line.png)
 
-![Version 1.2.0 Information panel](v1.2.0/software-information.png)
+![Version 1.2.0 Information panel](v1.2.1/software-information.png)
 
-[Connector settings](v1.2.0/settings-connector.png) ·
-[Station setup](v1.2.0/settings-stations.png) ·
-[Saved team refresh](v1.2.0/team/saved-team-800x480.png) ·
-[Flexible failure catalogue](v1.2.0/failures/failure-reasons-800x480.png) ·
-[Current software version](v1.2.0/update-panel-current.png).
+[Connector settings](v1.2.1/settings-connector.png) ·
+[Station setup](v1.2.1/settings-stations.png) ·
+[Saved team refresh](v1.2.1/team/saved-team-800x480.png) ·
+[Flexible failure catalogue](v1.2.1/failures/failure-reasons-800x480.png) ·
+[Current software version](v1.2.1/update-panel-current.png).
 
 ## Compact and portrait layouts
 
-[800×480 grouped line](v1.2.0/groups/groups-800x480.png) ·
-[480×800 portrait](v1.2.0/groups/groups-480x800.png) ·
-[1920×1200 grouped view](v1.2.0/render/1920x1200-console.png) ·
-[Portrait Settings](v1.2.0/layout/settings-0-480x800.png) ·
-[Minimum viewport](v1.2.0/touch/main-320x400.png).
+[800×480 grouped line](v1.2.1/groups/groups-800x480.png) ·
+[480×800 portrait](v1.2.1/groups/groups-480x800.png) ·
+[1920×1200 grouped view](v1.2.1/render/1920x1200-console.png) ·
+[Portrait Settings](v1.2.1/layout/settings-0-480x800.png) ·
+[Minimum viewport](v1.2.1/touch/main-320x400.png).
 
 The application adapts to available geometry. Image dimensions are examples, not
 required monitor resolutions. See [touchscreen commissioning](../adaptive-kiosk.md).
 
 ## What these images establish—and what they do not
 
-- The source matches the v1.2.0 release; no production installation is read or changed.
+- The source matches the v1.2.1 release; no production installation is read or changed.
 - Names, incidents and department data are neutral fixtures. External connections
   are disabled or replaced by in-memory transports with sockets blocked.
 - Disabled support buttons are expected without a connector. A connected indicator

@@ -25,10 +25,10 @@ delivery state, attempt count, identifier and any problem. Nothing covers the
 station controls or changes the physical line status merely because a network
 response arrives late.
 
-![Saved-updates review on an 800×480 Pi viewport](images/v1.2.0/delivery/delivery-800x480.png)
+![Saved-updates review on an 800×480 Pi viewport](images/v1.2.1/delivery/delivery-800x480.png)
 
 This is a neutral offline development capture, not a real service response.
-[Full HD capture](images/v1.2.0/delivery/delivery-1920x1080.png).
+[Full HD capture](images/v1.2.1/delivery/delivery-1920x1080.png).
 
 - **Saved / queued:** recorded on this kiosk, not yet confirmed by the external
   service. Do not report the same incident again to clear this indication.

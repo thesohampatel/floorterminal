@@ -1,16 +1,16 @@
 """Viewport-bounded dialogs with fixed action footers and paged long content."""
 
 import math
-import string
 import time
 
-from .. import __version__
 from ..update import trust
-from .layout import split_row
+from .information import InformationViewMixin
+from .keyboard_layout import keyboard_page
+from .layout import split_row, text_pages
 from .operational_dialogs import OperationalDialogMixin
 
 
-class AdaptiveDialogMixin(OperationalDialogMixin):
+class AdaptiveDialogMixin(OperationalDialogMixin, InformationViewMixin):
     def dialog_shell(self, title, detail="", *, footer_rows=1):
         view = self.viewport()
         # Full kiosk page, not a floating desktop dialog. Keep long text readable
@@ -22,9 +22,10 @@ class AdaptiveDialogMixin(OperationalDialogMixin):
         )
         inner = (x + 16, y + 14, x + w - 16, y + h - 14)
         a, b, c, d = inner
-        self.row_label((a, b, c, b + 30), title, 14)
-        self.row_label((a, b + 30, c, b + 54), detail, 9, self.MUTED, "normal")
-        self.canvas.create_line(a, b + 56, c, b + 56, fill=self.BORDER)
+        self.rounded(a - 6, b - 6, c + 6, b + 57, 16, self.CARD)
+        self.rounded(a, b + 4, a + 4, b + 25, 3, self.BLUE)
+        self.row_label((a + 12, b, c - 6, b + 30), title, 14)
+        self.row_label((a + 12, b + 30, c - 6, b + 54), detail, 9, self.MUTED, "normal")
         footer = d - footer_rows * 56 + 8
         return (a, b + 62, c, footer - 8), (a, footer, c, d)
 
@@ -73,18 +74,17 @@ class AdaptiveDialogMixin(OperationalDialogMixin):
             lines.extend((line, False) for line in self.wrap_lines(value, c - a - 24))
             lines.append(("", False))
         available = max(1, int((d - b - 16) / 20))
-        pages = (
-            1
-            if len(lines) <= available
-            else math.ceil(len(lines) / max(1, available - 3))
-        )
-        per_page = available if pages == 1 else max(1, available - 3)
+        per_page = available if len(lines) <= available else max(1, available - 3)
+        content_pages = text_pages(lines, per_page)
+        pages = len(content_pages)
         page = max(0, min(owner.get("layout_page", 0), pages - 1))
         owner["layout_page"], owner["layout_pages"] = page, pages
-        self.rounded(a, b, c, d, 14, "#F5F8FC", self.BORDER)
-        for index, (value, heading) in enumerate(
-            lines[page * per_page : (page + 1) * per_page]
-        ):
+        self.rounded(a, b, c, d, 18, self.CARD, self.BORDER)
+        for index, (value, heading) in enumerate(content_pages[page]):
+            if heading:
+                self.rounded(
+                    a + 8, b + 8 + index * 20, c - 8, b + 27 + index * 20, 5, "#EDF3FC"
+                )
             self.text(
                 a + 12,
                 b + 8 + index * 20,
@@ -298,35 +298,7 @@ class AdaptiveDialogMixin(OperationalDialogMixin):
             self.dialog_actions(footer, [("cancel", "Close", None, self.TEXT)])
             return
         if kind == "about":
-            profile = self.project_profile
-            body, footer = self.dialog_shell(
-                profile.product_name, f"Version {__version__} • Software information"
-            )
-            self.paragraph_page(
-                body,
-                [
-                    (
-                        "CREATED & MAINTAINED BY",
-                        profile.maintainer_name + "\n" + profile.support_contact,
-                    ),
-                    ("ABOUT", profile.product_tagline),
-                    (
-                        "MIT OPEN-SOURCE LICENSE",
-                        "You may use, copy, modify, merge, publish, distribute, sublicense and sell this software. Retain the copyright and MIT license notice in copies or substantial portions.",
-                    ),
-                    (
-                        "NOT INCLUDED",
-                        "External-service access, credentials, deployment data, trademarks and third-party rights.",
-                    ),
-                    (
-                        "DEPLOYMENT RESPONSIBILITY • PROVIDED AS-IS",
-                        "Trained people remain responsible for guarding, E-stops, lockout/tagout and permits. This console is not a machine safety controller. Verify connectors, credentials, networks, updates and backups. Protect logs, personal data and retention according to your site's requirements.",
-                    ),
-                    ("COPYRIGHT", profile.copyright_notice),
-                ],
-            )
-            self.dialog_actions(footer, [("cancel", self.t("close"), None, self.TEXT)])
-            return
+            return self.about_dialog()
         if kind == "update":
             return self.adaptive_update_dialog()
         if kind == "update_actions":
@@ -434,43 +406,31 @@ class AdaptiveDialogMixin(OperationalDialogMixin):
         self.rounded(a, b, c, b + 40, 12, "#EFF4FA", self.BORDER)
         self.row_label((a + 10, b, c - 10, b + 40), shown or "—", 12, anchor="center")
         b += 48
-        columns = max(1, min(10, int((c - a + 6) // 50)))
-        rows = max(1, int((d - b) // 50))
-        characters = (
-            "1234567890QWERTYUIOPASDFGHJKLZXCVBNM@"
-            + string.punctuation.replace("@", "")
+        keys, page, pages, navigation = keyboard_page(
+            (a, b, c, d), modal.get("keys_page", 0), symbols=modal.get("symbols", False)
         )
-        capacity = columns * rows
-        pages = math.ceil(len(characters) / capacity)
-        if pages > 1:
-            rows = max(1, int((d - b - 52) // 50))
-            capacity = columns * rows
-            pages = math.ceil(len(characters) / capacity)
-        page = min(modal.get("keys_page", 0), pages - 1)
         modal["keys_page"], modal["keys_pages"] = page, pages
-        chars = characters[page * capacity : (page + 1) * capacity]
-        for row in range(rows):
-            group = chars[row * columns : (row + 1) * columns]
-            if not group:
-                break
-            for char, box in zip(
-                group, split_row((a, b + row * 50, c, b + row * 50 + 44), columns, 6)
-            ):
-                display = char if modal.get("shift", True) else char.lower()
-                self.kiosk_button(f"pwd_{ord(display)}", box, display)
-        if pages > 1:
+        for char, box in keys:
+            display = char if modal.get("shift", True) else char.lower()
+            self.kiosk_button(f"pwd_{ord(display)}", box, display, self.CARD)
+        if navigation:
             for key, label, box in zip(
                 ("ui_keys_prev", "ui_keys_next"),
-                ("‹ Keys", "More keys ›"),
-                split_row((a, d - 48, c, d), 2),
+                (f"‹ Keys {page + 1}/{pages}", "More keys ›"),
+                split_row(navigation, 2),
             ):
                 self.kiosk_button(key, box, label)
         # Typing actions have their own row; submit/cancel always remain visible.
         x1, y1, x2, y2 = footer
         for key, label, box in zip(
-            ("pwd_shift", "pwd_space", "pwd_back"),
-            ("Shift", "Space", "Back"),
-            split_row((x1, y1, x2, y1 + 48), 3),
+            ("pwd_shift", "pwd_symbols", "pwd_space", "pwd_back"),
+            (
+                "ABC" if modal.get("shift", True) else "abc",
+                "Letters" if modal.get("symbols") else "#+=",
+                "Space",
+                "Delete",
+            ),
+            split_row((x1, y1, x2, y1 + 48), 4),
         ):
             self.kiosk_button(key, box, label)
         self.dialog_actions(
@@ -532,7 +492,13 @@ class AdaptiveDialogMixin(OperationalDialogMixin):
         status = self.update_status()
         extra = status.can_install and status.can_rollback and not self.busy
         compact_actions = extra and self.viewport().width < 616
-        rows = 2
+        action_count = (
+            1 if self.busy else 3 + int(status.can_install) + int(status.can_rollback)
+        )
+        if compact_actions:
+            action_count = 4
+        action_columns = 2 if self.viewport().width - 40 < 560 else min(4, action_count)
+        rows = math.ceil(action_count / action_columns)
         detail = status.headline
         if self.busy:
             elapsed = max(
@@ -553,18 +519,41 @@ class AdaptiveDialogMixin(OperationalDialogMixin):
         text_box = (a, b + 56, c, d)
         paragraphs = []
         if page == "status":
+            version_cards = d - b >= 270
+            if version_cards:
+                for (heading, value), rect in zip(
+                    (
+                        ("INSTALLED ON THIS TERMINAL", status.installed_version),
+                        ("LATEST PUBLISHED", status.latest_version or "Not confirmed"),
+                    ),
+                    split_row((a, b + 56, c, b + 124), 2),
+                ):
+                    x, y, right, bottom = rect
+                    self.rounded(*rect, 18, self.CARD, self.BORDER)
+                    self.row_label(
+                        (x + 12, y + 6, right - 12, y + 28), heading, 8, self.MUTED
+                    )
+                    self.row_label(
+                        (x + 12, y + 28, right - 12, bottom - 6), value, 18, self.BLUE
+                    )
+                text_box = (a, b + 132, c, d)
             paragraphs = [
                 ("STATUS", status.detail),
-                ("INSTALLED", status.installed_version),
-                ("LATEST PUBLISHED", status.latest_version or "Not confirmed"),
                 (
                     "OFFLINE UPDATES",
-                    "Download the signed update package from "
-                    + trust.RELEASES_URL
-                    + f". Label the drive {trust.UPDATE_VOLUME_LABELS[0]}, put the package in {trust.UPDATE_PACKAGE_DIRNAME}, insert the drive, then choose Scan drive. Installation requires administrator authorization. Reporting continues independently of update availability.",
+                    f"Download a signed update from the project Releases page. Label the drive {trust.UPDATE_VOLUME_LABELS[0]} and place the extracted package in {trust.UPDATE_PACKAGE_DIRNAME}. Insert the drive and choose Scan drive. Installation requires administrator authorization; reporting remains available.",
                 ),
+                ("RELEASE SOURCE", trust.RELEASES_URL),
                 ("SUPPORT", trust.MAINTAINER_NAME + " • " + trust.MAINTAINER_EMAIL),
             ]
+            if not version_cards:
+                paragraphs.insert(
+                    1,
+                    (
+                        "VERSIONS",
+                        f"Installed: {status.installed_version}\nLatest published: {status.latest_version or 'Not confirmed'}",
+                    ),
+                )
         elif page == "version":
             entry = self._installed_catalog_entry()
             paragraphs = [

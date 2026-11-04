@@ -1,48 +1,42 @@
 {
   "archive": {
-    "name": "floorterminal-v1.2.0-linux-arm64.tar.gz",
-    "sha256": "ea381cc0fc9213fc9f8a831590d34d0d79b4b0c071f02611019acc5d51c76cab"
+    "name": "floorterminal-v1.2.1-linux-arm64.tar.gz",
+    "sha256": "1f5ab14c3c3a998b90d587d6bece38d6a872122e815f8eb8c6dbb61159ea1509"
   },
   "document_type": "update_channel",
   "product_id": "floorterminal",
-  "published_utc": "2026-11-04T00:39:54Z",
+  "published_utc": "2026-11-04T14:59:05Z",
   "release": {
     "artifact": {
       "name": "floorterminal",
-      "sha256": "9c547e123aadb4c049c9eb04b7660fad41ef92d107eb2987803183fac5a450c5",
-      "size_bytes": 15262392
+      "sha256": "16dacdc09dcafb69918f2b298473b633950adbb58c8ad5431e48204d7f49fddd",
+      "size_bytes": 15277200
     },
     "features": [
-      "Independent production groups with group-only or whole-line stop propagation and concurrent responses",
-      "Operator self-fix with escalation to Engineering on the same incident",
-      "Per-station failure catalogues with automatic Others, touch paging and search",
-      "Daily idle-time roster refresh and a manual Settings refresh with offline saved names",
-      "Configurable request budgets, durable background delivery and standalone incident history",
-      "Adaptive fullscreen kiosk Settings, touch feedback and stable group/conveyor animation"
+      "Dedicated HH:MM:SS local-time card separated from line names and status notices",
+      "Three configurable support shortcuts with independent labels, message destinations and visibility",
+      "Information tabs for project overview, contact, MIT license and safe deployment",
+      "Balanced number/QWERTY rows and a separate complete symbol keyboard"
     ],
     "fixes": [
-      "Correct the installed-version description and complete the v1.2.0 capability catalogue",
-      "Refresh the release gallery and reject preview wording during publication checks",
-      "Avoid repeated crew-directory requests and preserve cooldown deadlines across restarts",
-      "Retain operator decisions and queued updates through network loss and failed acknowledgements",
-      "Prevent animation item churn and unnecessary redraws beneath static dialogs",
-      "Keep short-screen station actions and Settings Save/Cancel controls reachable",
-      "Preserve complete directory pagination under small API budgets and reject ambiguous recipients",
-      "Keep connector data and newer configuration extensions during supported version changes"
+      "Keep failure-choice cards equal in size, including incomplete rows, with a separate selection toolbar",
+      "Keep touch targets stationary while showing press, release and contact acknowledgement",
+      "Use available Update-panel space for version cards and correctly sized action rows",
+      "Keep section headings beside their explanations when paginating information",
+      "Preserve existing incident assignment and automatic notifications when customizing manual support calls",
+      "Retain the original destination of already queued support messages after Settings edits"
     ],
     "minimum_upgradable_version": "1.0.0",
-    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.0",
-    "release_summary": "Local-first production response with independent station groups, operator self-fix and handover, flexible failure reasons, daily saved-team refresh, adaptive kiosk controls and safer offline updates.",
-    "release_title": "FloorTerminal 1.2.0",
-    "released_utc": "2026-11-04T00:39:54Z",
+    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.1",
+    "release_summary": "Refined kiosk interaction with a dedicated seconds clock, balanced touch keyboard, consistent failure choices, configurable support shortcuts and clearer information and update pages.",
+    "release_title": "FloorTerminal 1.2.1",
+    "released_utc": "2026-11-04T14:47:02Z",
     "security": [
-      "Bounded strict JSON, private state/checkpoints and hardened audit-file handling",
-      "Ambiguous writes require verified idempotency or explicit protected reconciliation",
-      "Read-only update compatibility checks refuse unsafe downgrades without deleting data",
-      "Software probation requires a healthy GUI before confirmation",
-      "Release bundles contain no real connector credentials, saved incidents or private signing material"
+      "Support configuration validates labels, destinations, visibility and the exact three-slot structure",
+      "Administrator authorization, connector capability checks and signed-update verification remain enforced",
+      "Release packages contain neutral disabled connectors and no deployment credentials or private signing keys"
     ],
-    "version": "1.2.0"
+    "version": "1.2.1"
   },
   "schema_version": 1,
   "targets": [

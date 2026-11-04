@@ -2,6 +2,29 @@
 
 This project follows semantic versioning for published releases.
 
+## 1.2.1 — 4 November 2026
+
+- Dedicated, fixed-width `HH:MM:SS` local-time display, separated from the line
+  name and status notice in landscape, portrait and compact layouts.
+- Familiar number/QWERTY rows, a separate complete symbol keyboard, balanced
+  compact rows and consistent touch-key sizes; masked passwords and existing
+  authorization rules are unchanged.
+- Equal-size failure cards, including incomplete rows, and a separate fixed
+  All/None/Find/page toolbar. Others and multi-selection remain available.
+- Three optional, configurable message-only support shortcuts in Settings:
+  independent labels, chat/person destinations and visibility. Existing routing
+  remains the default; incident assignment and lifecycle messages are unchanged.
+- In-bounds press compression, brief release feedback and contact acknowledgement
+  using the existing repaint loop; bounded native button surfaces and callbacks.
+- Shared rounded page headings, readable content sections, Information tabs for
+  overview/license/safety and adaptive Software Update version cards/action rows.
+- Regression coverage for layout, character reachability, custom support routing,
+  disabled shortcuts, saved message destinations and version-independent fixtures.
+
+Signed ARM64 installation and USB-update downloads accompany this release.
+Existing v1.2.0 kiosks can upgrade normally without replacing their deployment
+configuration or connectors. See [release notes](docs/releases/v1.2.1.md).
+
 ## 1.2.0
 
 **Same-version reissue, 3 November 2026:** corrected the compiled Version panel's

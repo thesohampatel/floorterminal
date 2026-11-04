@@ -1,6 +1,7 @@
 {
   "reporting_mode": "connected",
   "station_groups": [],
+  "support_buttons": null,
   "line_name": "Demonstration Line",
   "location_id": "",
   "asset_id": "",

@@ -703,12 +703,13 @@ class FloorTerminalApp(
         if self.render_blocked:
             return
         x, y = self.canvas.to_logical(event.x, event.y)
+        self.touch_feedback = (x, y, time.monotonic())
+        self.pressed = None
         for key, box in reversed(list(self.hitboxes.items())):
             if box[0] <= x <= box[2] and box[1] <= y <= box[3]:
                 self.pressed = key
-                self.touch_feedback = (x, y, time.monotonic())
-                self.request_render()
                 break
+        self.request_render()
 
     def on_keypress(self, event):
         self.note_operator_activity()
@@ -782,6 +783,7 @@ class FloorTerminalApp(
         box = self.hitboxes[key]
         if not (box[0] <= x <= box[2] and box[1] <= y <= box[3]):
             return
+        self._released_control = (key, time.monotonic())
         if self.busy and key not in {
             "error_dismiss",
             "ui_feedback",
@@ -833,6 +835,9 @@ class FloorTerminalApp(
                     self.modal["value"] += chr(int(action))
                 elif action == "shift":
                     self.modal["shift"] = not self.modal.get("shift", True)
+                elif action == "symbols":
+                    self.modal["symbols"] = not self.modal.get("symbols", False)
+                    self.modal["keys_page"] = 0
                 elif action == "back":
                     self.modal["value"] = self.modal["value"][:-1]
                 elif action == "space" and len(self.modal["value"]) < self.modal.get(

@@ -34,8 +34,8 @@ class RuntimeCompatibilityTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.work = Path(temporary.name)
-        self.layout = InstallLayout(build_installation(self.work / "app", "1.2.0"))
-        installer.initialise(self.layout, "1.2.0")
+        self.layout = InstallLayout(build_installation(self.work / "app", __version__))
+        installer.initialise(self.layout, __version__)
         self.root = self.layout.root
         self.config_file = self.root / "config.json"
         self.connector = json.loads((ROOT / "connector.example.json").read_text())
@@ -57,7 +57,7 @@ class RuntimeCompatibilityTests(unittest.TestCase):
         (self.root / ".active_connector").write_text("spare.connector.json\n")
         before = compat.runtime_files(self.root)
         report = compat.inspect_runtime(self.root)
-        checkpoint = compat.checkpoint(self.layout, "1.2.0")
+        checkpoint = compat.checkpoint(self.layout, __version__)
         self.assertEqual(report["connector_count"], 2)
         self.assertEqual(before, compat.runtime_files(self.root))
         for name, payload in before.items():
@@ -184,7 +184,7 @@ class RuntimeCompatibilityTests(unittest.TestCase):
                 compat.restore_config_extensions(self.root, {"line_name": "current"})
 
     def test_external_version_slot_is_not_a_managed_installation(self):
-        external = self.work / "external" / "versions" / "1.2.0"
+        external = self.work / "external" / "versions" / __version__
         external.mkdir(parents=True)
         (external / trust.EXECUTABLE_NAME).write_bytes(b"fixture")
         self.layout.active_link.unlink()
@@ -229,12 +229,12 @@ class RuntimeCompatibilityTests(unittest.TestCase):
         state.data["started_at"] = 1000
         state.save()
         with self.assertRaisesRegex(compat.CompatibilityError, "active responses"):
-            compat.checkpoint(self.layout, "1.2.0")
+            compat.checkpoint(self.layout, __version__)
         state.data = deepcopy(INITIAL_STATE)
         state.data["asset_status_sync_pending"] = True
         state.save()
         with self.assertRaisesRegex(compat.CompatibilityError, "synchronization"):
-            compat.checkpoint(self.layout, "1.2.0")
+            compat.checkpoint(self.layout, __version__)
 
     def test_missing_explicit_selection_does_not_fall_back_to_another_connector(self):
         (self.root / ".active_connector").write_text("absent.connector.json")
@@ -265,7 +265,7 @@ class RuntimeCompatibilityTests(unittest.TestCase):
             self.work, target_is_directory=True
         )
         with self.assertRaisesRegex(compat.CompatibilityError, "directories"):
-            compat.checkpoint(self.layout, "1.2.0")
+            compat.checkpoint(self.layout, __version__)
         for index in range(33):
             self.save(f"extra-{index}.connector.json", self.connector)
         with self.assertRaisesRegex(compat.CompatibilityError, "Too many"):
@@ -279,13 +279,13 @@ class RuntimeCompatibilityTests(unittest.TestCase):
             ),
             self.assertRaisesRegex(compat.CompatibilityError, "free storage"),
         ):
-            compat.checkpoint(self.layout, "1.2.0")
+            compat.checkpoint(self.layout, __version__)
         self.assertEqual(compat.runtime_files(self.root), before)
-        self.assertEqual(self.layout.active_version(), "1.2.0")
+        self.assertEqual(self.layout.active_version(), __version__)
 
     def test_checkpoint_retention_is_bounded_even_before_confirmation(self):
         for _ in range(6):
-            compat.checkpoint(self.layout, "1.2.0")
+            compat.checkpoint(self.layout, __version__)
         self.assertEqual(
             len(list((self.layout.update_dir / "data-checkpoints").iterdir())), 3
         )
@@ -302,7 +302,7 @@ class RuntimeCompatibilityTests(unittest.TestCase):
             self.assertRaisesRegex(compat.CompatibilityError, "changed during"),
         ):
             compat.checkpoint(self.layout, "1.3.0")
-        self.assertEqual(self.layout.active_version(), "1.2.0")
+        self.assertEqual(self.layout.active_version(), __version__)
         self.assertEqual(
             list((self.layout.update_dir / "data-checkpoints").iterdir()), []
         )
@@ -378,7 +378,7 @@ class RuntimeCompatibilityTests(unittest.TestCase):
             media.stage(self.layout, media.read_package(mount), expect_executable=True)
             with self.assertRaises(installer.ActivationError):
                 installer.activate(self.layout, "1.3.0")
-        self.assertEqual(self.layout.active_version(), "1.2.0")
+        self.assertEqual(self.layout.active_version(), __version__)
         self.assertTrue(
             (self.layout.staging_dir / "1.3.0" / trust.EXECUTABLE_NAME).is_file()
         )
@@ -448,7 +448,7 @@ class VersionChangeOrderingTests(unittest.TestCase):
 
             def change(events=events):
                 events.append("switch")
-                return SimpleNamespace(from_version="1.1.0", to_version="1.2.0")
+                return SimpleNamespace(from_version="1.1.0", to_version=__version__)
 
             def perform(_message, function, done, **options):
                 self.assertFalse(options["transactional"])

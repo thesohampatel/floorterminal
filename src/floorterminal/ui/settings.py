@@ -43,6 +43,7 @@ from .layout import Viewport
 from .navigation import PageBook
 from .panels import AppPanel
 from .roster_settings import RosterSettingsMixin
+from .support_settings import SupportSettingsMixin
 from .touch_button import TouchButton
 
 UI_LANGUAGE_CONFIG_KEY = "ui_language"
@@ -54,7 +55,9 @@ FIELD_BORDER = "#B9C7D8"
 INPUT_TEXT = "#14213D"
 
 
-class SettingsWindow(GroupSettingsMixin, FailureSettingsMixin, RosterSettingsMixin):
+class SettingsWindow(
+    GroupSettingsMixin, FailureSettingsMixin, RosterSettingsMixin, SupportSettingsMixin
+):
     COLOR_KEYS = (
         "background",
         "card",
@@ -963,6 +966,7 @@ class SettingsWindow(GroupSettingsMixin, FailureSettingsMixin, RosterSettingsMix
         )
         for field_row, (label, key, choices) in enumerate(rows):
             self._field(routing, field_row, label, key, choices=choices, editable=True)
+        self.build_support_settings(body, conversations)
         self.build_roster_tools(body)
 
     def _test_selected_connector(self):
@@ -1660,6 +1664,8 @@ class SettingsWindow(GroupSettingsMixin, FailureSettingsMixin, RosterSettingsMix
         try:
             self._store_station()
             candidate = deepcopy(self.app.config)
+            if hasattr(self, "support_enabled"):
+                candidate["support_buttons"] = self.support_settings_value()
             for key, var in self.vars.items():
                 if not key.startswith("color_") and not key.startswith("integration_"):
                     candidate[key] = var.get().strip()

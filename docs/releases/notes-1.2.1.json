@@ -1,0 +1,24 @@
+{
+  "release_title": "FloorTerminal 1.2.1",
+  "release_summary": "Refined kiosk interaction with a dedicated seconds clock, balanced touch keyboard, consistent failure choices, configurable support shortcuts and clearer information and update pages.",
+  "minimum_upgradable_version": "1.0.0",
+  "features": [
+    "Dedicated HH:MM:SS local-time card separated from line names and status notices",
+    "Three configurable support shortcuts with independent labels, message destinations and visibility",
+    "Information tabs for project overview, contact, MIT license and safe deployment",
+    "Balanced number/QWERTY rows and a separate complete symbol keyboard"
+  ],
+  "fixes": [
+    "Keep failure-choice cards equal in size, including incomplete rows, with a separate selection toolbar",
+    "Keep touch targets stationary while showing press, release and contact acknowledgement",
+    "Use available Update-panel space for version cards and correctly sized action rows",
+    "Keep section headings beside their explanations when paginating information",
+    "Preserve existing incident assignment and automatic notifications when customizing manual support calls",
+    "Retain the original destination of already queued support messages after Settings edits"
+  ],
+  "security": [
+    "Support configuration validates labels, destinations, visibility and the exact three-slot structure",
+    "Administrator authorization, connector capability checks and signed-update verification remain enforced",
+    "Release packages contain neutral disabled connectors and no deployment credentials or private signing keys"
+  ]
+}

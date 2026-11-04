@@ -44,6 +44,15 @@ rewriting operator evidence. See [catalogue usage](failure-reasons.md).
 
 ## Application layers
 
+For v1.2.1, `core/support.py` owns the validated three-slot manual
+support configuration and resolves legacy defaults without changing incident or
+automatic-notification routing. `ui/support_settings.py` edits those slots inside
+the protected Settings draft; the workflow snapshots label/destination before
+queuing the existing message operation. `ui/keyboard_layout.py` and the shared
+`ui/layout.py` grid/header helpers are pure geometry, tested without a display.
+`ui/information.py` separates identity/licensing/safety presentation from workflow
+logic. No new network transport or runtime graphics dependency is introduced.
+
 The project uses a layered, single-responsibility structure:
 
 - `app.py`: application lifecycle — construction, startup, rendering cadence, the Tk event loop, and shutdown.

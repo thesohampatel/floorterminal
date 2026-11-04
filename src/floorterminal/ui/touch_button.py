@@ -38,13 +38,15 @@ class TouchButton(tk.Button):
         )
         self.face_color, self.face_backdrop = bg, backdrop
         self.face_padding = (padx, pady)
+        self._release_after = None
         self.refresh_surface()
         self.bind("<Enter>", lambda _event: self._face("active"), add="+")
         self.bind("<Leave>", lambda _event: self._face("normal"), add="+")
         self.bind("<ButtonPress-1>", lambda _event: self._face("pressed"), add="+")
-        self.bind("<ButtonRelease-1>", lambda _event: self._face("normal"), add="+")
+        self.bind("<ButtonRelease-1>", self._release_face, add="+")
         self.bind("<KeyPress-space>", lambda _event: self._face("pressed"), add="+")
-        self.bind("<KeyRelease-space>", lambda _event: self._face("normal"), add="+")
+        self.bind("<KeyRelease-space>", self._release_face, add="+")
+        self.bind("<Destroy>", self._cancel_release, add="+")
 
     def refresh_surface(self, width=None, height=None):
         """Resize only on layout/font changes, never on the animation clock."""
@@ -75,7 +77,15 @@ class TouchButton(tk.Button):
         self.faces = {}
         for key, factor in (("normal", 1), ("active", 0.96), ("pressed", 0.88)):
             fill = tuple(round(value * factor) for value in base)
-            png = rounded_rectangle_png(width, height, 8, fill, None, 0, surface)
+            png = rounded_rectangle_png(
+                width,
+                height,
+                min(12, height / 4),
+                fill,
+                tuple(round(v * 0.82) for v in base),
+                1,
+                surface,
+            )
             self.faces[key] = tk.PhotoImage(master=self, data=png, format="png")
         self.configure(image=self.faces["normal"])
         cost = width * height * 4 * 3
@@ -87,5 +97,24 @@ class TouchButton(tk.Button):
                 root._touch_face_bytes -= w * h * 4 * 3
 
     def _face(self, name):
+        if name == "pressed":
+            self._cancel_release()
         if str(self.cget("state")) != "disabled":
             self.configure(image=self.faces[name])
+
+    def _cancel_release(self, _event=None):
+        if self._release_after is not None:
+            self.after_cancel(self._release_after)
+            self._release_after = None
+
+    def _release_face(self, _event=None):
+        self._cancel_release()
+        if str(self.cget("state")) == "disabled":
+            return
+        self._face("active")
+
+        def settled():
+            self._release_after = None
+            self._face("normal")
+
+        self._release_after = self.after(120, settled)
