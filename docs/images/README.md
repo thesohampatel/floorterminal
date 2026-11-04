@@ -1,128 +1,103 @@
-# Image provenance
+# FloorTerminal v1.2.0 — interface gallery
 
-The main walkthrough images were regenerated from v1.2.0 on 3 November 2026 on
-the attached Pi 5 graphical session, at native 1600×960 pixels. They show only
-disposable offline data. Update examples derive the installed version from the
-package and explicitly illustrate a hypothetical next release; they do not query
-or announce a real future version.
+These images show the **released v1.2.0 application**, regenerated on a Raspberry Pi 5
+on **3 November 2026**. They are native captures of real application widgets with
+disposable offline examples, not design mockups or edited application screens.
+The [image manifest](v1.2.0/manifest.json) records source identity, dimensions,
+frame counts and SHA-256 hashes. Every current guide uses this versioned gallery;
+earlier development captures have been removed from the current documentation.
 
-The release images in this directory are captured from the running app
-by [`scripts/docs/capture_images.py`](../../scripts/docs/capture_images.py), using
-the neutral offline demonstration configuration and no connector. None contains a
-manually redrawn application screen.
+## Independent station groups
 
-`v1.2-development/` retains the dated native previews captured while developing
-v1.2.0; its directory name records provenance, not release availability.
-The `saved-team-*` images are native 2 November 2026 captures of the Settings
-roster section from `tests/unit/roster_ui_driver.py --capture DIR`, using the
-attached Pi graphical session. The saved member count/time is disposable fixture
-data; requests use an in-memory transport and sockets are blocked. The driver
-also verifies button reachability, stable open pickers, unchanged connector/config
-files and responsiveness during a blocked refresh. No installed kiosk data is used.
+![Running, stopped and responding groups](v1.2.0/group-console.png)
 
-The `failure-reasons-*` files are native 2 November 2026 captures of app-owned
-800×480 and 480×800 viewports on the attached Pi 5 graphical session. They come
-from `tests/unit/variable_failure_ui_driver.py --capture DIR`, with a neutral
-53-reason fixture, no credentials and socket connections blocked. The driver
-waits for touch feedback/page transitions to finish before capturing. It also
-checks 30 catalogue/viewport combinations, cross-page editor preservation and
-refusal to edit recorded reasons during an active incident.
+![Group-specific conveyor animation](v1.2.0/group-motion.webp)
 
-The `panel-*-1920x1200.png` files are native 29 October 2026 captures on an
-attached Pi 5 / Wayland/labwc touchscreen. `panel-crew` and `panel-settings` use
-`tests/unit/panel_ui_driver.py`; `panel-groups` uses the grouped rendering scene
-from `tests/unit/render_stress_driver.py --groups --screenshots DIR`.
-All are disposable neutral fixtures with network calls blocked. The grouped scene
-illustrates stopped/responding/running groups; it is not a live production record.
-No production desktop, credential or account data is shown, and no image is upscaled.
-`panel-choice-800x480.png` is the corresponding native touch-option sheet from
-`tests/unit/experience_ui_driver.py --capture DIR`, using the same blocked-network
-fixture and an app-owned 800×480 viewport on that panel.
+Each group has its own border, stations, status and conveyor segment. A running
+group keeps moving while other groups are stopped or responding. The rendered
+scene is illustrative; it is not a live factory record.
+[Setup and stop propagation](../station-groups.md).
 
-The `groups-*` and `group-overview.png` files were refreshed on 26 October 2026;
-`group-settings.png` remains the 25 October capture. They are native Pi/Xvfb captures from
-`tests/unit/group_ui_driver.py --capture DIR`. Neutral standalone fixtures show
-two independently active incidents and a third running group. The actual touch
-flow and Settings save/reload are exercised; sockets are denied before startup.
-They contain no deployment data and are not upscaled.
+## Report, respond and resume
 
-The earlier `settings.png`, `connection.png` and `stations.png` are native
-1600×960 Pi/Xvfb captures from
-[`tests/unit/render_stress_driver.py`](../../tests/unit/render_stress_driver.py)
-using `--screenshots`, the same neutral runtime, and no connector API calls. They
-do not replace the published-release walkthroughs. See
-[development UI verification](../ui-performance.md).
+![Station choice and report actions](v1.2.0/station-failure-selection.png)
 
-The `kiosk-*` and `settings-*-*` files in that folder are the newer 24 October
-adaptive-layout captures from `tests/unit/adaptive_ui_driver.py --capture DIR`.
-Their dimensions are in their filenames; they are not upscaled. This isolated
-test enables UI capabilities with an in-memory descriptor to show action layouts,
-but blocks socket connections and has no credentials. The visible “not configured”
-status is intentional: these are layout previews, not live-service demonstrations.
+![Engineering report and response walkthrough](v1.2.0/operator-walkthrough.webp)
 
-The `operator-response-*` files were refreshed on 26 October 2026;
-`kiosk-password.png` remains the 24 October capture. They are native 800×480
-Pi/Xvfb captures produced by
-`tests/unit/operator_ui_driver.py --capture DIR`. They show the actual offline
-touch-through self-fix/handover workflow. All sockets are denied; operator/station
-names are neutral fixtures. The driver verifies the whole window matches the
-capture dimensions; no screen is cropped from an oversized window or upscaled.
+[Station selection](v1.2.0/operator-console.png) ·
+[Awaiting response](v1.2.0/line-interrupted.png) ·
+[Repair in progress](v1.2.0/response-in-progress.png) ·
+[Quick crew selection](v1.2.0/touch/crew-800x480.png).
 
-The `touch-*` files are native 26 October 2026 Pi/Xvfb captures from
-`tests/unit/touch_budget_driver.py --capture DIR`, showing the shortened report,
-crew and release paths. Dimensions are in the filenames. This driver uses a
-scripted transport, a synthetic roster and a fixture-only credential, with socket
-connections blocked before app startup. A green Connected label is a fixture UI
-state, not evidence of a live service connection. No fixture credential is visible.
-See [operator touch flows](../operator-touch-flow.md).
+## Operator self-fix and handover
 
-The `delivery-*` files are native 21 October Pi/Xvfb captures from
-`tests/unit/delivery_ui_driver.py --capture DIR`. They show a deliberately held
-offline fixture in Saved updates at 800×480 and 1920×1080. Socket connections are
-blocked; identifiers and messages are synthetic. No real credential, customer
-information or provider response is included.
+![Operator self-fix](v1.2.0/self-fix/operator-response-active.png)
 
-The update images use immutable, in-memory status snapshots that match the typed
-`UpdateStatus` contract exercised by the test suite. This keeps documentation
-generation network-free and prevents it from reading deployment or signing data.
-Signature, manifest, media, staging, activation, rollback, and launcher behaviour
-remain covered separately by the offline automated tests. The indicator reference
-and `update-walkthrough.gif` are assembled from the same real interface captures.
+[Response choice](v1.2.0/self-fix/operator-response-choice.png) ·
+[Short reporting path](../operator-touch-flow.md) · [Self-fix safety and escalation](../operator-self-fix.md).
 
-The screenshots contain no production data, credentials, real API responses,
-build-host account names, or desktop content. Soham Patel's approved public name
-and support email are deliberately visible in Information. The update views use an
-illustrative USB path and fictional future release states. These are MIT-licensed
-documentation artifacts, not evidence of a live integration or published update.
+## Fullscreen settings and current release information
 
-Published-release main screens and dialogs are captured at **1600×960 native pixels**, and Settings
-is captured at its own native fitted window dimensions. PNG is lossless. The
-operator walkthrough uses lossless animated WebP. The live conveyor recording and
-the update GIF are reduced to 1200×720 for download size. No screenshot is enlarged.
-The logo has a separate [SVG master](../../branding/floorterminal/floorterminal-mark.svg).
+![Current Settings interface](v1.2.0/settings-line.png)
 
-Regenerate them whenever the interface or product identity changes; a stale
-screenshot is a documentation defect. From a graphical desktop session:
+![Version 1.2.0 Information panel](v1.2.0/software-information.png)
+
+[Connector settings](v1.2.0/settings-connector.png) ·
+[Station setup](v1.2.0/settings-stations.png) ·
+[Saved team refresh](v1.2.0/team/saved-team-800x480.png) ·
+[Flexible failure catalogue](v1.2.0/failures/failure-reasons-800x480.png) ·
+[Current software version](v1.2.0/update-panel-current.png).
+
+## Compact and portrait layouts
+
+[800×480 grouped line](v1.2.0/groups/groups-800x480.png) ·
+[480×800 portrait](v1.2.0/groups/groups-480x800.png) ·
+[1920×1200 grouped view](v1.2.0/render/1920x1200-console.png) ·
+[Portrait Settings](v1.2.0/layout/settings-0-480x800.png) ·
+[Minimum viewport](v1.2.0/touch/main-320x400.png).
+
+The application adapts to available geometry. Image dimensions are examples, not
+required monitor resolutions. See [touchscreen commissioning](../adaptive-kiosk.md).
+
+## What these images establish—and what they do not
+
+- The source matches the v1.2.0 release; no production installation is read or changed.
+- Names, incidents and department data are neutral fixtures. External connections
+  are disabled or replaced by in-memory transports with sockets blocked.
+- Disabled support buttons are expected without a connector. A connected indicator
+  in a test-driver view denotes an in-memory fixture, not a verified real service.
+- Update panels use typed status snapshots. **Hypothetical next-version screens
+  are examples only**; they do not announce a version beyond the public Releases page.
+- PNG images are lossless native pixels. The walkthrough WebP is lossless; the update
+  GIF is reduced to 1200×720. Nothing is upscaled.
+- The two conveyor clips contain 72 real-renderer frames at fixed **24-fps animation
+  steps**, reduced from 1600×960 to 1200×720. They are animation demonstrations, not
+  wall-clock capture or a performance claim. Native timing measurements are in
+  [verification](../verification.md).
+- Public attribution and support email in Information are intentional. No private
+  credentials, deployment data or desktop content appears. The images and capture
+  utility are covered by the project's MIT license.
+
+## Reproduce the current gallery
+
+Use a disposable source checkout and an isolated graphical session on a Pi. Leave
+the screen untouched and do not run this over a production operator's session.
+Pillow is a documentation-only dependency. The native panel needs at least
+1920×1200 for the largest captures; a private Xvfb display of that size is an
+alternative. On Wayland, the existing capture utility uses `grim` when necessary.
 
 ```bash
-python3 -m pip install Pillow
-python3 scripts/docs/capture_images.py
+python3 docs/images/capture_release.py \
+  --output /tmp/floorterminal-release-gallery \
+  --logs /tmp/floorterminal-gallery-logs
 ```
 
-On a Pi whose attached panel is only 800×480, render native HD in a private virtual
-display instead of enlarging the panel's output:
+The output folder must be empty. The orchestrator runs the existing primary
+capture utility and group, operator, adaptive-layout, touch-budget, roster,
+failure-catalogue, delivery, controls, native-panel and grouped-render drivers.
+It fails if a driver reports an error. The script then creates two fixed-step
+conveyor demonstrations and a versioned image manifest. Logs remain **outside**
+the gallery and must not be published; inspect every image before replacing docs.
 
-```bash
-sudo apt-get install xvfb xauth python3-pil fonts-dejavu-core
-xvfb-run -a -s "-screen 0 1920x1200x24 -dpi 96 -nolisten tcp" \
-  python3 scripts/docs/capture_images.py
-```
-
-The harness isolates all runtime files in a temporary directory, disables sounds
-and network update checks, brings the application window forward, rejects a blank
-frame or undersized capture, and verifies that all 22 expected assets were produced.
-Windowed mode is forced for capture so kiosk fullscreen cannot silently shrink an
-HD request to the attached panel's size. This is documentation tooling only, not a
-production simulation mode. On current
-Raspberry Pi OS Wayland/labwc sessions it automatically falls back from Pillow's
-X11 capture path to the native `grim` region-capture utility.
+Only documentation assets change. Reproducing screenshots does not rebuild,
+re-sign, install or publish the application, and does not require a signing key.

@@ -4,6 +4,13 @@ This project follows semantic versioning for published releases.
 
 ## 1.2.0
 
+**Same-version reissue, 3 November 2026:** corrected the compiled Version panel's
+development wording and capability catalogue, refreshed the complete Pi screenshot
+gallery, and added release-metadata and data-preserving reinstall regressions.
+The executable and checksums changed, not the version number. Existing 1.2.0
+installations need the [documented administrative reinstall](docs/releases/v1.2.0-reissue.md),
+not a normal USB upgrade. This is an explicit exception to the normal release policy.
+
 ### Added
 
 - Independent production groups, group-only/whole-line stop scopes, concurrent

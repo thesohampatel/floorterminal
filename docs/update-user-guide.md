@@ -10,7 +10,7 @@ and confirm the change on the touchscreen. The terminal checks the update by its
 before it will install anything. It can restore a retained previous version when
 that version can safely use the terminal's current data.
 
-![Walkthrough of an offline update](images/update-walkthrough.gif)
+![Walkthrough of an offline update](images/v1.2.0/update-walkthrough.gif)
 
 ---
 
@@ -19,7 +19,7 @@ that version can safely use the terminal's current data.
 A small round indicator sits between the clock and the blue **i** information
 button. It is the only thing this feature adds to the everyday screen.
 
-![The update indicator in each of its three states](images/update-indicator-states.png)
+![The update indicator in each of its three states](images/v1.2.0/update-indicator-states.png)
 
 | Indicator | What it means | What you should do |
 |---|---|---|
@@ -45,7 +45,7 @@ Touch the indicator to open the Software Update panel. It has four tabs.
 
 ### Update status
 
-![Software Update panel when the terminal is up to date](images/update-panel-current.png)
+![Software Update panel when the terminal is up to date](images/v1.2.0/update-panel-current.png)
 
 - what version this terminal is running and how it was installed;
 - what the newest published version is, when it is known;
@@ -57,21 +57,21 @@ Touch the indicator to open the Software Update panel. It has four tabs.
 Everything the running version can do, taken from the build itself — so it is
 accurate even with no network and no drive attached.
 
-![The capabilities included in the running version](images/update-panel-version.png)
+![The capabilities included in the running version](images/v1.2.0/update-panel-version.png)
 
 ### What is new
 
 The changes in the version that is waiting to be installed, or in the newest
 published version, split into new features, fixes, and security changes.
 
-![Changes contained in the waiting version](images/update-panel-changes.png)
+![Changes contained in the waiting version](images/v1.2.0/update-panel-changes.png)
 
 ### Update activity
 
 Every installation, rollback, and automatic recovery this terminal has performed,
 with the name of the person who authorized it.
 
-![Update activity recorded on the terminal](images/update-panel-activity.png)
+![Update activity recorded on the terminal](images/v1.2.0/update-panel-activity.png)
 
 ---
 
@@ -153,7 +153,7 @@ Within a few seconds the terminal:
 4. copies the verified program onto the terminal;
 5. turns the update indicator amber, shows a message, and opens the panel.
 
-![The console after a verified update drive is inserted](images/update-console-amber.png)
+![The console after a verified update drive is inserted](images/v1.2.0/update-console-amber.png)
 
 Nothing has changed yet. The terminal is still running the old version, and it will
 keep running it until a person authorizes the change.
@@ -166,13 +166,13 @@ that is not newer than the one already installed.
 
 Open the Software Update panel and touch **INSTALL VERSION x.y.z**.
 
-![The panel with a verified update ready to install](images/update-panel-ready.png)
+![The panel with a verified update ready to install](images/v1.2.0/update-panel-ready.png)
 
 The terminal asks for the administrator name and then the Settings password — the
 same authorization used for Settings and for closing the kiosk. The administrator
 identity and authorized action are recorded in the update log, **not the password**.
 
-![Administrator authorization before a version change](images/update-panel-authorization.png)
+![Administrator authorization before a version change](images/v1.2.0/update-panel-authorization.png)
 
 In the v1.2.0 updater, an active response, parked group incident or
 unfinished synchronization blocks the change. Finish and synchronize that work,
@@ -232,7 +232,7 @@ before the update is never modified or deleted while it can still be needed.
 
 ## When the indicator is red
 
-![The panel when the terminal cannot reach the release channel](images/update-panel-blocked.png)
+![The panel when the terminal cannot reach the release channel](images/v1.2.0/update-panel-blocked.png)
 
 The most common reason is simply that the terminal has no internet access, which is
 normal and often deliberate on a factory network. It means the terminal cannot tell

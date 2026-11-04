@@ -86,8 +86,8 @@ An installation made by the current `install.sh` is *managed*:
 ├── floorterminal          symlink → versions/<active>/floorterminal
 ├── bin/floorterminal-launch                 supervised launcher and boot watchdog
 ├── versions/
-│   ├── 1.0.0/floorterminal + LICENSE, notices, SBOM, VERSION
-│   └── 1.1.0/floorterminal + release.json
+│   ├── 1.1.0/floorterminal + LICENSE, notices, SBOM, VERSION
+│   └── 1.2.0/floorterminal + release.json
 ├── update/
 │   ├── boot_state                 launcher-readable activation state (KEY=VALUE)
 │   ├── journal.json               full activation history for the panel
@@ -152,9 +152,9 @@ medium by the terminal.
   "product_id": "floorterminal",
   "target": "linux/aarch64",
   "release": {
-    "version": "1.1.0",
-    "released_utc": "2026-11-14T09:00:00Z",
-    "release_title": "Faster startup, clearer sync, safer offline updates",
+    "version": "1.2.0",
+    "released_utc": "2026-11-03T13:39:22Z",
+    "release_title": "FloorTerminal 1.2.0",
     "release_summary": "One paragraph an operator can act on.",
     "minimum_upgradable_version": "1.0.0",
     "artifact": {
@@ -162,7 +162,7 @@ medium by the terminal.
       "sha256": "<64 lowercase hex characters>",
       "size_bytes": 13755320
     },
-    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.1.0",
+    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.0",
     "features": ["…"],
     "fixes": ["…"],
     "security": ["…"]

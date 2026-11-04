@@ -11,6 +11,8 @@
     "Adaptive fullscreen kiosk Settings, touch feedback and stable group/conveyor animation"
   ],
   "fixes": [
+    "Correct the installed-version description and complete the v1.2.0 capability catalogue",
+    "Refresh the release gallery and reject preview wording during publication checks",
     "Avoid repeated crew-directory requests and preserve cooldown deadlines across restarts",
     "Retain operator decisions and queued updates through network loss and failed acknowledgements",
     "Prevent animation item churn and unnecessary redraws beneath static dialogs",

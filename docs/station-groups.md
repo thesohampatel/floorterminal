@@ -280,12 +280,12 @@ neutral stations in standalone mode and all sockets denied. They are not mockups
 or evidence of a production service connection. Each image retains its native
 resolution; click to inspect the full pixels.
 
-![Independent responding, stopped and running groups at 800×480](images/v1.2-development/groups-800x480.png)
+![Independent responding, stopped and running groups at 800×480](images/v1.2.0/groups/groups-800x480.png)
 
-![Group overview with explicit state and impact rules](images/v1.2-development/group-overview.png)
+![Group overview with explicit state and impact rules](images/v1.2.0/groups/group-overview.png)
 
-![Production group editor in kiosk Settings](images/v1.2-development/group-settings.png)
+![Production group editor in kiosk Settings](images/v1.2.0/groups/group-settings.png)
 
-[Portrait 480×800](images/v1.2-development/groups-480x800.png) ·
-[Full HD 1920×1080](images/v1.2-development/groups-1920x1080.png) ·
+[Portrait 480×800](images/v1.2.0/groups/groups-480x800.png) ·
+[Full HD 1920×1080](images/v1.2.0/groups/groups-1920x1080.png) ·
 [Capture provenance](images/README.md)

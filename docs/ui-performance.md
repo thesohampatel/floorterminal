@@ -287,11 +287,11 @@ These are native 1600×960 captures of the real, connector-disabled Pi UI, not
 mockups or evidence of a published 1.2.0 release. Scrollable form content may extend
 below its viewport; the Save/Cancel footer stays visible.
 
-![Rounded in-window Settings](images/v1.2-development/settings.png)
+![Rounded in-window Settings](images/v1.2.0/settings-line.png)
 
-![Configurable application request budget](images/v1.2-development/connection.png)
+![Configurable application request budget](images/v1.2.0/settings-connector.png)
 
-![Station-specific failure editor](images/v1.2-development/stations.png)
+![Station-specific failure editor](images/v1.2.0/settings-stations.png)
 
 ## Background-delivery verification — 21 October 2026
 

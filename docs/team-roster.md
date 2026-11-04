@@ -53,9 +53,9 @@ directory remains available in **Update crew** so their departure can be recorde
 refresh never silently removes someone from an active incident. Previously recorded
 participation and historical names remain part of their original incident.
 
-![Saved team refresh on the kiosk](images/v1.2-development/saved-team-800x480.png)
+![Saved team refresh on the kiosk](images/v1.2.0/team/saved-team-800x480.png)
 
-[Portrait layout preview](images/v1.2-development/saved-team-480x800.png).
+[Portrait layout preview](images/v1.2.0/team/saved-team-480x800.png).
 
 ## Offline, quota and directory errors
 
