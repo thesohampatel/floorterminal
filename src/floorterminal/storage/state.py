@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
+from contextlib import contextmanager
 from copy import deepcopy
 from numbers import Real
 
-from ..core.config import STATE_FILE, restrict_file, write_json
+from ..core.config import STATE_FILE, write_json
+from ..core.json_file import read_bounded_json
+from ..core.roster import validate_refresh
+from .delivery import validate_journal
 
 STATE_SCHEMA_VERSION = 1
 VALID_STATUSES = {"RUNNING", "DOWN", "REPAIRING", "ENGINEERING"}
@@ -34,9 +39,19 @@ class StateSaveError(RuntimeError):
     """
 
 
-#: Fields added in 1.1.0. They are written only while they carry information, so
+#: Fields added since 1.1.0. They are written only while they carry information, so
 #: an idle terminal's state file stays readable by 1.0.0 after a version rollback.
 SPARSE_DEFAULTS = {
+    "incident_id": None,
+    "incident_scope": None,
+    "parked_incidents": {},
+    "history_pending": [],
+    "history_links": {},
+    "operator_response": None,
+    "delivery_outbox": [],
+    "delivery_pause_until": 0,
+    "roster_cache": {},
+    "roster_refresh": {},
     "work_label": None,
     "work_type": None,
     "completion_confirmed_at": None,
@@ -101,7 +116,9 @@ def _validate_queue_entry(entry, name):
         raise StateIntegrityError(f"Persisted {name} attempts are invalid")
     for key in ("last_attempt_at", "retry_after_seconds", "expires_at"):
         if not _optional_number(entry.get(key)):
-            raise StateIntegrityError(f"Persisted {name} {key} must be a number or null")
+            raise StateIntegrityError(
+                f"Persisted {name} {key} must be a number or null"
+            )
     if not isinstance(entry.get("last_error", ""), str):
         raise StateIntegrityError(f"Persisted {name} last_error must be text")
 
@@ -159,13 +176,18 @@ def _validate_work_fields(data):
         status_record = message.get("status_record_id")
         if status_record is not None and not _record_id(status_record):
             raise StateIntegrityError("Persisted message status_record_id is invalid")
-        if message.get("record_status_outcome") not in {None, "pending", "confirmed", "failed"}:
+        if message.get("record_status_outcome") not in {
+            None,
+            "pending",
+            "confirmed",
+            "failed",
+        }:
             raise StateIntegrityError("Persisted message completion outcome is invalid")
         if message.get("kind", "lifecycle") not in {"lifecycle", "support"}:
             raise StateIntegrityError("Persisted message kind is invalid")
 
 
-def validate_state(data):
+def validate_state(data, nested=False):
     if not isinstance(data, dict):
         raise StateIntegrityError("response_state.json must contain one JSON object")
     unknown = set(data) - set(INITIAL_STATE)
@@ -173,7 +195,95 @@ def validate_state(data):
         raise StateIntegrityError(
             "Persisted state contains unsupported fields: " + ", ".join(sorted(unknown))
         )
+    if not nested:
+        from .history import validate_links, validate_pending
+        from .incidents import validate_incidents
+
+        try:
+            validate_incidents(data, validate_state, INITIAL_STATE)
+            validate_pending(data.get("history_pending", []))
+            validate_links(data.get("history_links", {}))
+        except (ValueError, TypeError, AttributeError, KeyError) as exc:
+            raise StateIntegrityError(str(exc)) from exc
+    try:
+        validate_journal(data.get("delivery_outbox", []))
+        validate_refresh(data.get("roster_refresh", {}))
+        pause = data.get("delivery_pause_until", 0)
+        if (
+            isinstance(pause, bool)
+            or not isinstance(pause, (int, float))
+            or not math.isfinite(pause)
+            or pause < 0
+        ):
+            raise ValueError("Invalid delivery pause")
+        roster = data.get("roster_cache", {})
+        if not isinstance(roster, dict) or len(json.dumps(roster)) > 128 * 1024:
+            raise ValueError("Invalid roster cache")
+        if roster and (
+            set(roster) != {"binding", "team_name", "team_id", "members", "saved_at"}
+            or not isinstance(roster["members"], list)
+            or len(roster["members"]) > 1000
+        ):
+            raise ValueError("Invalid roster cache fields")
+        if roster and (
+            not isinstance(roster["binding"], str)
+            or len(roster["binding"]) != 64
+            or any(c not in "0123456789abcdef" for c in roster["binding"])
+            or not isinstance(roster["team_name"], str)
+            or not _record_id(roster["team_id"])
+            or isinstance(roster["saved_at"], bool)
+            or not isinstance(roster["saved_at"], (int, float))
+            or not math.isfinite(roster["saved_at"])
+            or roster["saved_at"] < 0
+        ):
+            raise ValueError("Invalid roster cache metadata")
+        for member in roster.get("members", []):
+            if (
+                not isinstance(member, dict)
+                or set(member) != {"id", "displayName"}
+                or not _record_id(member.get("id"))
+                or not isinstance(member.get("displayName"), str)
+                or not member["displayName"].strip()
+                or len(member["displayName"]) > 200
+            ):
+                raise ValueError("Invalid cached team member")
+    except (ValueError, TypeError) as exc:
+        raise StateIntegrityError(str(exc)) from exc
     status = data.get("status")
+    operator = data.get("operator_response")
+    if operator is not None:
+        if not isinstance(operator, dict) or set(operator) != {
+            "name",
+            "started_at",
+            "requested_at",
+            "handed_over_at",
+        }:
+            raise StateIntegrityError("Invalid operator-response fields")
+        if (
+            not isinstance(operator["name"], str)
+            or len(operator["name"]) > 120
+            or any(ord(c) < 32 for c in operator["name"])
+        ):
+            raise StateIntegrityError("Invalid operator-response name")
+        for key in ("started_at", "requested_at", "handed_over_at"):
+            value = operator[key]
+            if value is None and key != "started_at":
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise StateIntegrityError("Invalid operator-response timestamp")
+        if status not in {"DOWN", "REPAIRING"}:
+            raise StateIntegrityError(
+                "Operator response requires an active unplanned incident"
+            )
+        if operator["started_at"] != data.get("started_at"):
+            raise StateIntegrityError(
+                "Operator response must belong to the current incident"
+            )
     if status not in VALID_STATUSES:
         raise StateIntegrityError(f"Invalid persisted machine status: {status!r}")
     if any(
@@ -187,7 +297,8 @@ def validate_state(data):
         raise StateIntegrityError("Persisted timer values must be numbers or null")
     response_record_id = data.get("response_record_id")
     if response_record_id is not None and (
-        isinstance(response_record_id, bool) or not isinstance(response_record_id, (str, int))
+        isinstance(response_record_id, bool)
+        or not isinstance(response_record_id, (str, int))
     ):
         raise StateIntegrityError(
             "Persisted response_record_id must be text, a number, or null"
@@ -251,9 +362,13 @@ def validate_state(data):
     asset_context = data.get("asset_status_sync_context")
     if asset_context is not None:
         if not isinstance(asset_context, dict):
-            raise StateIntegrityError("Persisted asset status context must be an object")
+            raise StateIntegrityError(
+                "Persisted asset status context must be an object"
+            )
         if asset_context.get("status") not in {"ONLINE", "OFFLINE", "IGNORE"}:
-            raise StateIntegrityError("Persisted asset status context target is invalid")
+            raise StateIntegrityError(
+                "Persisted asset status context target is invalid"
+            )
         if asset_context.get("downtime_type") not in {None, "PLANNED", "UNPLANNED"}:
             raise StateIntegrityError("Persisted asset status context type is invalid")
         for key in ("description", "started_at"):
@@ -268,7 +383,9 @@ def validate_state(data):
     pending_status = data.get("pending_response_status")
     if pending_status is not None:
         if not isinstance(pending_status, dict):
-            raise StateIntegrityError("Persisted response status update must be an object")
+            raise StateIntegrityError(
+                "Persisted response status update must be an object"
+            )
         if pending_status.get("status") not in {"IN_PROGRESS", "DONE"}:
             raise StateIntegrityError("Persisted response status target is invalid")
         if isinstance(pending_status.get("record_id"), bool) or not isinstance(
@@ -279,20 +396,28 @@ def validate_state(data):
         if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
             raise StateIntegrityError("Persisted response status attempts are invalid")
         if not _optional_number(pending_status.get("last_attempt_at")):
-            raise StateIntegrityError("Persisted response status last attempt is invalid")
+            raise StateIntegrityError(
+                "Persisted response status last attempt is invalid"
+            )
     pending_assignment = data.get("pending_participant_assignment")
     if pending_assignment is not None:
         if not isinstance(pending_assignment, dict):
-            raise StateIntegrityError("Persisted participant assignment must be an object")
+            raise StateIntegrityError(
+                "Persisted participant assignment must be an object"
+            )
         if isinstance(pending_assignment.get("record_id"), bool) or not isinstance(
             pending_assignment.get("record_id"), (str, int)
         ):
-            raise StateIntegrityError("Persisted participant assignment record ID is invalid")
+            raise StateIntegrityError(
+                "Persisted participant assignment record ID is invalid"
+            )
         team_id = pending_assignment.get("team_id")
         if team_id is not None and (
             isinstance(team_id, bool) or not isinstance(team_id, (str, int))
         ):
-            raise StateIntegrityError("Persisted participant assignment team ID is invalid")
+            raise StateIntegrityError(
+                "Persisted participant assignment team ID is invalid"
+            )
         user_ids = pending_assignment.get("user_ids")
         if not isinstance(user_ids, list) or any(
             isinstance(value, bool) or not isinstance(value, (str, int))
@@ -301,9 +426,13 @@ def validate_state(data):
             raise StateIntegrityError("Persisted participant IDs are invalid")
         attempts = pending_assignment.get("attempts", 0)
         if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
-            raise StateIntegrityError("Persisted participant assignment attempts are invalid")
+            raise StateIntegrityError(
+                "Persisted participant assignment attempts are invalid"
+            )
         if not _optional_number(pending_assignment.get("last_attempt_at")):
-            raise StateIntegrityError("Persisted participant assignment last attempt is invalid")
+            raise StateIntegrityError(
+                "Persisted participant assignment last attempt is invalid"
+            )
     if not isinstance(data.get("pending_sync_error"), str):
         raise StateIntegrityError("Persisted pending_sync_error must be text")
     pending = data.get("pending_response_record")
@@ -324,7 +453,9 @@ def validate_state(data):
             not _optional_number(pending.get("created_at"))
             or pending.get("created_at") is None
         ):
-            raise StateIntegrityError("Pending response record created_at must be a number")
+            raise StateIntegrityError(
+                "Pending response record created_at must be a number"
+            )
         attempts = pending.get("sync_attempts", 0)
         if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
             raise StateIntegrityError(
@@ -411,14 +542,17 @@ def persisted_view(data):
 
 
 class StateStore:
-    def __init__(self, path=STATE_FILE):
+    def __init__(self, path=STATE_FILE, *, read_only=False):
         self.path = path
         self._lock = threading.RLock()
-        if path.exists():
-            restrict_file(path)
+        self._transaction_depth = 0
         try:
             saved = (
-                json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+                read_bounded_json(
+                    path, max_bytes=32 * 1024 * 1024, private=not read_only
+                )
+                if path.exists() or path.is_symlink()
+                else {}
             )
         except OSError as exc:
             raise StateIntegrityError(f"Cannot read {path.name}: {exc}") from exc
@@ -426,10 +560,14 @@ class StateStore:
             raise StateIntegrityError(
                 f"Corrupt {path.name} at line {exc.lineno}, column {exc.colno}; the terminal will not assume Production is running"
             ) from exc
-        if saved and not isinstance(saved, dict):
+        except (ValueError, UnicodeError) as exc:
+            raise StateIntegrityError(f"Cannot trust {path.name}: {exc}") from exc
+        if not isinstance(saved, dict):
             raise StateIntegrityError(f"{path.name} must contain one JSON object")
-        schema = saved.get("schema_version") if isinstance(saved, dict) else None
-        if schema not in (None, STATE_SCHEMA_VERSION):
+        schema = saved.get("schema_version")
+        if schema is not None and (
+            type(schema) is not int or schema != STATE_SCHEMA_VERSION
+        ):
             raise StateIntegrityError(
                 f"Unsupported downtime state schema_version: {schema!r}"
             )
@@ -484,10 +622,28 @@ class StateStore:
         view that matches the file and one bad value cannot poison later saves.
         """
         with self._lock:
+            if self._transaction_depth:
+                return False
             try:
                 snapshot = self._snapshot()
+                from .history import stage_active
+
+                stage_active(snapshot, self._committed)
                 validate_state(snapshot)
-                write_json(self.path, persisted_view(snapshot))
+                persisted = persisted_view(snapshot)
+                if (
+                    len(
+                        json.dumps(
+                            persisted, indent=2, ensure_ascii=False, allow_nan=False
+                        ).encode()
+                    )
+                    + 1
+                    > 32 * 1024 * 1024
+                ):
+                    raise StateIntegrityError(
+                        "Recovery state exceeds the 32 MiB safety limit"
+                    )
+                write_json(self.path, persisted)
             except (StateIntegrityError, OSError, TypeError, ValueError) as exc:
                 self.rollback()
                 raise StateSaveError(
@@ -495,6 +651,33 @@ class StateStore:
                     "was restored"
                 ) from exc
             self._committed = snapshot
+            self.data["history_pending"] = deepcopy(snapshot["history_pending"])
+            return True
+
+    @contextmanager
+    def transaction(self):
+        """Commit a local transition and all its delivery intents together."""
+        with self._lock:
+            if not self._transaction_depth:
+                self._transaction_failure = None
+            self._transaction_depth += 1
+            try:
+                yield
+                if self._transaction_failure is not None:
+                    raise self._transaction_failure
+            except BaseException:
+                self._transaction_depth -= 1
+                self.rollback()
+                raise
+            else:
+                self._transaction_depth -= 1
+                if not self._transaction_depth and self.data != self._committed:
+                    self.save()
+
+    def fail_transaction(self, error):
+        """Prevent legacy best-effort handlers from committing a partial journal."""
+        if self._transaction_depth:
+            self._transaction_failure = error
 
     def _snapshot(self):
         """Copy the live state, tolerating a concurrent change on the UI thread.

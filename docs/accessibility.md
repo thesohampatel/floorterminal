@@ -1,8 +1,8 @@
 # Accessibility and human-factors evidence
 
-This document records what has been **measured**, not what is intended. Every figure
-below is reproducible from the repository, and the rules that are enforced are
-enforced by tests rather than by review.
+This document distinguishes automated geometry/contrast checks from physical
+usability that must be checked at the installation. See [release verification](verification.md)
+for the current tested version, platforms and limitations.
 
 It supports the human-centred-design guidance referenced in
 [industrial deployment](industrial-deployment.md) (ISO 9241-210) and uses
@@ -18,57 +18,52 @@ PYTHONPATH=src python3 -m unittest tests.unit.test_accessibility -v
 PYTHONPATH=src python3 -m unittest tests.unit.test_ui_smoke -v
 ```
 
-Touch-target figures come from the live application: the sweep renders every
-workflow state and dialog, reads the touch targets the controller actually
-registered, and converts logical units to millimetres using the active area of each
-panel. The interface is a fixed 800 x 480 logical design scaled uniformly, so a
-larger panel enlarges every control by the same factor.
+The GUI drivers render workflow states and read the registered touch targets, not
+just the intended rectangles in a design drawing. Version 1.2 uses a reflowing
+viewport, not a fixed 800×480 picture enlarged to fill every screen. Its density
+depends on available pixels and orientation; text measurement and available space
+also affect control layout. See [adaptive kiosk layouts](adaptive-kiosk.md).
 
 ## Touch targets
 
-| Control | Logical | 7-inch 800x480 | 10.1-inch 1280x800 |
-|---|---|---|---|
-| Primary action (report / repair / complete) | 479 x 60 | 92.3 x 11.6 mm | 129.9 x 16.3 mm |
-| Station select | 56 x 78 | 10.8 x 15.0 mm | 15.2 x 21.2 mm |
-| Whole-line select | 212 x 47 | 40.8 x 9.1 mm | 57.5 x 12.7 mm |
-| Failure choice | 276 x 54 | 53.2 x 10.4 mm | 74.9 x 14.6 mm |
-| Failure dialog controls | 112 x 47 | 21.6 x 9.1 mm | 30.4 x 12.7 mm |
-| Responder row | 540 x 47 | 104.0 x 9.1 mm | 146.4 x 12.7 mm |
-| Confirm / save in a dialog | 360 x 47 | 69.3 x 9.1 mm | 97.6 x 12.7 mm |
-| Settings gear | 48 x 48 | 9.2 x 9.2 mm | 13.0 x 13.0 mm |
-| Information | 48 x 48 | 9.2 x 9.2 mm | 13.0 x 13.0 mm |
-| Software update indicator | 48 x 48 | 9.2 x 9.2 mm | 13.0 x 13.0 mm |
-| On-screen keyboard key | 48 x 47 | 9.2 x 9.1 mm | 13.0 x 12.7 mm |
-| Update panel tab | 161 x 47 | 31.0 x 9.1 mm | 43.7 x 12.7 mm |
-| Update panel action | 128 x 47 | 24.7 x 9.1 mm | 34.7 x 12.7 mm |
+The normal control design uses approximately **48 logical units**; geometry
+regressions check minimum **44-unit** targets on the operational paths they cover.
+Settings footer checks also verify that Save and Cancel are mapped, on-screen and
+actually receive input rather than being covered by another widget. Large reason
+catalogues use bounded pages/search instead of shrinking every option to fit.
 
-71 distinct controls measured. Every control clears 9 mm on both supported panels except 0 on the 7-inch panel. The smallest control anywhere is 9.1 mm.
+These are not guaranteed millimetre measurements. Two displays with the same
+resolution can have different physical sizes, and reported DPI is not reliable
+enough to certify finger or glove usability. To measure an installed control:
 
-**What this means.** Every registered control clears the 9 mm guidance on both
-supported panels. The figures come from the running application, not from the source,
-so a layout change that shrinks a control is visible immediately.
+```text
+control width in mm = rendered width in pixels × active panel width in mm / panel width in pixels
+```
 
-**Open decision for the deployment owner.** Nine millimetres is common guidance for an
-ungloved fingertip; heavy gloves are usually given 15 mm or more, which the primary
-action, station selection, whole-line selection and failure choices already exceed on
-both panels. [Industrial deployment](industrial-deployment.md) step 8 requires this to
-be confirmed with the site's real gloves before production.
+Use the actual active display area, account for compositor scaling, and measure
+height separately. Test the smallest controls, spacing and accidental-touch rate
+with the site's gloves, lighting and viewing distance before production. The
+old fixed-layout millimetre table is not applicable to the adaptive 1.2 interface.
+See [industrial deployment](industrial-deployment.md) for the site checklist.
 
 ## Layout integrity
 
-The interface is one 800 x 480 logical design scaled uniformly, but font sizes are
-rounded per scale, so a label can outgrow its container at one panel size and not
-another. `tests/unit/test_ui_smoke.py` therefore renders every workflow state and
-dialog at **7-inch, 10.1-inch and desktop** sizes and fails on:
+The supported usable viewport starts at **320×400 pixels**. Larger landscape,
+portrait and wide panels reflow; a list may use paging/search rather than exposing
+unreachable controls. Tests exercise several pixel sizes rather than assuming
+that a diagonal measurement determines layout. Font rounding can still affect
+text bounds, so `test_ui_smoke`, `test_adaptive_layout`, `test_quick_actions` and
+the group/failure GUI drivers check their respective states for:
 
-* any two pieces of text whose bounding boxes overlap within the same layer;
-* any text painted over by a shape drawn after it — the collision an operator
-  actually notices, because the label is simply not there;
-* any text drawn outside the canvas.
+- Text collisions within the same layer and text hidden by later opaque shapes.
+- Text and control bounds outside the viewport.
+- Overlapping or undersized operational hit targets.
+- Settings actions covered by another widget or pushed off-screen.
 
-Transient feedback owns the centre of the header by design. While a message is
-showing, the ambient chips step aside rather than being drawn underneath it; the
-clock, the update indicator, Information and Settings always remain available.
+Transient feedback uses a reserved status area rather than covering the station
+map or action buttons. Compact layouts may shorten secondary wording or move
+additional actions into a dedicated page. Tested bounds and collision checks do
+not prove every arbitrary configuration or compositor behaves identically.
 
 ## Colour and contrast
 
@@ -92,8 +87,9 @@ be reintroduced.
 
 ### What is enforced
 
-* Every control label reaches at least 3:1 against its own fill, in both packaged
-  palettes and in any deployment-chosen custom palette. `ui/contrast.py` keeps the
+* Status-button label colour selection targets at least 3:1 against its fill.
+  Tests cover the packaged palettes and representative pale custom fills.
+  `ui/contrast.py` keeps the
   established white label wherever it is readable and substitutes the dark text
   colour only where white would fail — which is what happens on amber, and matches
   the dark-on-amber convention used for caution signage.
@@ -101,7 +97,12 @@ be reintroduced.
 * Every status fill stays visible against both surfaces behind it.
 * A compliant darker text variant of the same hue exists for every palette role.
 
+These internal colour tests are not a complete WCAG audit: physical text size,
+every custom surface, focus visibility and assistive-technology support need
+separate assessment. Review custom palettes on the actual display.
+
 ### Measured contrast
+
 **standard** — measured against the page background `#F3F5F9`:
 
 | Role | Colour | As small text | As a button fill (chosen label) |
@@ -144,7 +145,7 @@ exactly as asked, because only the caller knows what surface they sit on.
 |---|---|
 | Words | Status title and subtitle on the machine card and the primary control |
 | Glyph | Animated status face, per-station state glyph, vector button icons |
-| Shape | Border weight and the animated focus ring around the next valid control |
+| Shape | Station/group boundaries, selected outlines and press feedback |
 | Motion | Conveyor, rollers, drive elements and products move only while running |
 | Colour | Palette role, chosen last and never alone |
 
@@ -154,21 +155,16 @@ corner marker whenever it is not green, so it is identifiable without colour.
 
 ## Language
 
-The interface is drawn from a packaged locale catalogue with a guaranteed English
-fallback. The catalogue holds 155 keys and covers the operator screen, the Software
-Update panel, and the protected Settings window. Two tests enforce this:
-`test_accessibility` fails if any user-facing wording in Settings is a source
-literal or if a key is used without a catalogue entry, and `test_update_application`
-fails if any update-panel label does not resolve.
+English is the packaged and verified interface language. Existing catalogue-based
+labels have an English fallback; tests check referenced catalogue keys and the
+established Settings/update labels. Some newer operational captions, validation
+messages and diagnostics remain English literals. Adding a catalogue alone does
+**not** translate every screen or establish complete localization support.
 
-The graphical smoke suite opens protected Settings at the minimum 800×480 viewport,
-selects each of its six tabs, and fails if a tab is unreachable or outside the
-visible notebook bounds.
-
-Diagnostic text produced by the update service and by configuration validation is
-English by design, as error text is elsewhere in the console. A site deploying in
-another language adds one JSON catalogue at build time and selects it with
-`ui_language`. Right-to-left layout is not supported.
+The graphical suites open all six protected Settings categories across compact,
+portrait and desktop viewports, checking navigation and footer reachability.
+Any additional locale needs a full wording, text-overflow and operator-usability
+review. Right-to-left layout is not supported.
 
 ## Known limits
 

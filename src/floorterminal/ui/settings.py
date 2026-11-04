@@ -8,10 +8,12 @@ import string
 import threading
 import tkinter as tk
 from copy import deepcopy
+from tkinter import font as tkfont
 from tkinter import ttk
 
 from ..core.config import (
     COLORBLIND_SAFE_COLORS,
+    DEFAULT_CONFIG,
     DIRECTORY_NAME_SETTINGS,
     STATION_FAILURE_FALLBACK,
     ConfigurationError,
@@ -23,6 +25,7 @@ from ..core.config import (
 from ..i18n import available_languages, load_translator
 from ..integration import (
     CONNECTOR_FILE,
+    ConnectorTestResult,
     DefinitionError,
     basic_diagnostic_connector,
     discover_connectors,
@@ -30,10 +33,17 @@ from ..integration import (
     test_connector,
     write_connector,
 )
-from ..storage.audit import ActivityLogger
 from ..storage.state import StateSaveError
 from ..update import trust as update_trust
-from .responsive import design_scale, fitted_window_geometry
+from .choices import TouchChoice
+from .failure_settings import FailureSettingsMixin
+from .fields import configure_fields
+from .group_settings import GroupSettingsMixin
+from .layout import Viewport
+from .navigation import PageBook
+from .panels import AppPanel
+from .roster_settings import RosterSettingsMixin
+from .touch_button import TouchButton
 
 UI_LANGUAGE_CONFIG_KEY = "ui_language"
 #: Settings whose value is a name in the connected service's directory. They are
@@ -44,7 +54,7 @@ FIELD_BORDER = "#B9C7D8"
 INPUT_TEXT = "#14213D"
 
 
-class SettingsWindow:
+class SettingsWindow(GroupSettingsMixin, FailureSettingsMixin, RosterSettingsMixin):
     COLOR_KEYS = (
         "background",
         "card",
@@ -58,22 +68,25 @@ class SettingsWindow:
         "border",
     )
 
-    def __init__(self, app, directory):
+    def __init__(self, app, directory, *, deferred=False):
         self.app = app
+        self._deferred_build = deferred
+        self._build_after = None
+        self._connector_test_after = None
+        self._roster_after = None
+        self._ready = False
+        self._build_count = 0
         self.t = app.t
         self.directory = directory or {"teams": [], "conversations": []}
-        screen_width, screen_height = (
-            app.root.winfo_screenwidth(),
-            app.root.winfo_screenheight(),
-        )
-        width, height, x, y = fitted_window_geometry(
-            screen_width, screen_height, 0.96, 0.88
-        )
-        responsive_scale = design_scale(width, height, 980, 650)
-        self.viewport_width, self.compact = width, responsive_scale < 0.8
-        self.scale = max(0.7, min(1.6, responsive_scale))
+        app.root.update_idletasks()
+        width = min(app.root.winfo_width(), app.root.winfo_screenwidth()) - 16
+        height = min(app.root.winfo_height(), app.root.winfo_screenheight()) - 16
+        responsive_scale = Viewport.from_pixels(width, height).scale * 0.85
+        self.viewport_width, self.compact = width, width < 900 or height < 600
+        self.scale = max(0.85, min(2.5, responsive_scale))
         # Readable on a 7-inch panel: nothing below 9 pt even when compact.
         self.minimum_font = 9
+        self._fonts = {}
         self.current_station = None
         self.stations = [
             {
@@ -86,23 +99,74 @@ class SettingsWindow:
             }
             for zone in app.config.get("zones", [])
         ]
-        self.win = tk.Toplevel(app.root)
-        self.win.title(f"{app.project_profile.product_short_name} Settings")
-        self.win.configure(bg=app.BG)
-        self.win.geometry(f"{width}x{height}+{x}+{y}")
-        self.win.transient(app.root)
+        self.win = AppPanel(
+            app.root,
+            background=app.BG,
+            border=app.BORDER,
+            on_visibility=self._visibility_changed,
+        )
+        app.root.update_idletasks()
         self.win.grab_set()
+        self.load_groups()
         self.vars = {}
         self._scroll_areas = []
-        self._wrapped = []
         self.texts = {}
         self.error = tk.StringVar()
         app.connector_inventory = discover_connectors()
         self._styles()
+        self.win.bind("<Destroy>", self._destroyed, add="+")
+        self.win.bind("<Configure>", self._resized, add="+")
         self._build()
 
+    def _resized(self, event):
+        if event.widget is not self.win:
+            return
+        self.viewport_width = min(event.width, self.app.root.winfo_screenwidth()) - 24
+        height = min(event.height, self.app.root.winfo_screenheight()) - 24
+        scale = max(
+            0.85,
+            min(2.5, Viewport.from_pixels(self.viewport_width, height).scale * 0.85),
+        )
+        if abs(scale - self.scale) < 0.025:
+            return
+        self.scale = scale
+        for (size, _weight), font in self._fonts.items():
+            font.configure(size=max(self.minimum_font, round(size * scale)))
+        self._styles()
+        pending = [self.win]
+        while pending:
+            widget = pending.pop()
+            pending.extend(widget.winfo_children())
+            if getattr(widget, "_ft_form_pager", False):
+                widget.configure(height=max(48, self.px(48)))
+            if isinstance(widget, TouchButton):
+                widget.face_padding = (self.px(18), self.px(10))
+                widget.refresh_surface()
+
+    def _destroyed(self, event):
+        if event.widget is self.win:
+            for attr in ["_connector_test_after", "_build_after", "_roster_after"]:
+                callback = getattr(self, attr, None)
+                if callback is not None:
+                    self.win.after_cancel(callback)
+                    setattr(self, attr, None)
+
+    def _visibility_changed(self, visible):
+        self.app.settings_visible = visible
+        self.app.note_operator_activity()
+        if not visible:
+            self.app.request_render()
+
     def font(self, size, weight="normal"):
-        return ("Helvetica", max(self.minimum_font, round(size * self.scale)), weight)
+        key = (size, weight)
+        if key not in self._fonts:
+            self._fonts[key] = tkfont.Font(
+                root=self.win,
+                family="Helvetica",
+                size=max(self.minimum_font, round(size * self.scale)),
+                weight=weight,
+            )
+        return self._fonts[key]
 
     def px(self, value):
         """Scale a design length for this window, never below a touch-safe size."""
@@ -143,11 +207,11 @@ class SettingsWindow:
         )
         style.configure(
             "Settings.TCombobox",
-            padding=(self.px(8), self.px(6)),
-            arrowsize=self.px(18),
+            padding=(self.px(12), self.px(7)),
+            arrowsize=self.px(26),
             foreground=INPUT_TEXT,
-            fieldbackground="#FFFFFF",
-            background="#E9EEF5",
+            fieldbackground="#F2F6FC",
+            background="#E4EDFA",
             bordercolor=FIELD_BORDER,
             lightcolor="#FFFFFF",
             darkcolor="#FFFFFF",
@@ -155,10 +219,11 @@ class SettingsWindow:
         )
         style.map(
             "Settings.TCombobox",
-            fieldbackground=[("readonly", "#FFFFFF"), ("disabled", "#F1F4F8")],
+            fieldbackground=[("readonly", "#F2F6FC"), ("disabled", "#F1F4F8")],
             bordercolor=[("focus", app.BLUE)],
             background=[("active", "#DCE5F0"), ("pressed", "#CFDBEA")],
         )
+        configure_fields(style, self.win, self.scale)
         # A wide, arrow-free scrollbar is easier to drag with a finger.
         style.layout(
             "Settings.Vertical.TScrollbar",
@@ -168,7 +233,10 @@ class SettingsWindow:
                     {
                         "sticky": "ns",
                         "children": [
-                            ("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})
+                            (
+                                "Vertical.Scrollbar.thumb",
+                                {"expand": "1", "sticky": "nswe"},
+                            )
                         ],
                     },
                 )
@@ -226,33 +294,42 @@ class SettingsWindow:
         self.win.option_add("*TCombobox*Listbox.selectForeground", "#FFFFFF")
 
     def _build(self):
-        header = tk.Frame(self.win, bg=self.app.BG)
-        header.pack(fill="x", padx=20, pady=(14, 6))
+        header = tk.Frame(self.win.content, bg="white")
+        header.pack(fill="x", padx=12, pady=(4, 8))
         tk.Label(
             header,
             text=self.t("settings_title"),
             font=self.font(19, "bold"),
             fg=self.app.TEXT,
-            bg=self.app.BG,
+            bg="white",
         ).pack(side="left")
-        if not self.compact:
-            tk.Label(
-                header,
-                text=self.t("settings_validation"),
-                font=self.font(9),
-                fg=self.app.MUTED,
-                bg=self.app.BG,
-            ).pack(side="right", pady=7)
+        header_hint = tk.Label(
+            header,
+            text=self.t("settings_validation"),
+            font=self.font(9),
+            fg=self.app.MUTED,
+            bg="white",
+        )
+
+        def fit_header(event):
+            if event.width >= 600:
+                header_hint.pack(side="right", pady=7)
+            else:
+                header_hint.pack_forget()
+
+        header.bind("<Configure>", fit_header)
         # Packed before the notebook: on a 480-pixel-high panel the tabs would
         # otherwise take every remaining pixel and push Save off the screen.
-        footer = tk.Frame(self.win, bg=self.app.BG)
-        footer.pack(side="bottom", fill="x", padx=20, pady=(8, 12))
-        self._button(footer, self.t("cancel"), self.win.destroy, "#DCE5F0", self.app.TEXT).pack(
-            side="right", padx=(10, 0)
-        )
+        footer = tk.Frame(self.win.content, bg="white")
+        footer.pack(side="bottom", fill="x", padx=12, pady=(8, 4))
+        self._button(
+            footer, self.t("cancel"), self.win.destroy, "#DCE5F0", self.app.TEXT
+        ).pack(side="right", padx=(10, 0))
         self._button(
             footer,
-            self.t("settings_save_compact") if self.compact else self.t("save_settings"),
+            self.t("settings_save_compact")
+            if self.compact
+            else self.t("save_settings"),
             self.save,
             self.app.BLUE,
             "white",
@@ -262,55 +339,153 @@ class SettingsWindow:
             textvariable=self.error,
             font=self.font(9, "bold"),
             fg=self.app.RED,
-            bg=self.app.BG,
+            bg="white",
             anchor="w",
             justify="left",
         )
         error_label.pack(side="left", fill="x", expand=True)
         self._autowrap(error_label, footer, 330)
-        self.tabs = ttk.Notebook(self.win, style="Settings.TNotebook")
-        self.tabs.pack(fill="both", expand=True, padx=18)
-        self._general_tab()
-        self._integration_tab()
-        self._stations_tab()
-        self._messages_tab()
-        self._system_tab()
-        self._appearance_tab()
-        self._enable_touch_scrolling()
+        self.tabs = PageBook(
+            self.win.content,
+            background=self.app.BG,
+            foreground=self.app.TEXT,
+            font=self.font(9, "bold"),
+        )
+        self.tabs.pack(fill="both", expand=True, padx=10)
+        self._build_steps = iter(
+            (
+                self._general_tab,
+                self._integration_tab,
+                self._stations_tab,
+                self._messages_tab,
+                self._system_tab,
+                self._appearance_tab,
+                self._enable_touch_scrolling,
+                self._bind_reflow,
+            )
+        )
+        if self._deferred_build:
+            self._build_after = self.win.after(16, self._build_next)
+        else:
+            for build in self._build_steps:
+                build()
+            self._ready = True
+            self.win.present()
+
+    def _build_next(self):
+        """Bound work by section and yield to touch/compositor between sections.
+
+        Tk widgets stay on their owning thread. Until complete, only the loading
+        page is interactive; no half-built form can be saved.
+        """
+        self._build_after = None
+        if not self.win.winfo_exists():
+            return
+        try:
+            build = next(self._build_steps, None)
+            if build is None:
+                self._ready = True
+                self.win.present()
+                return
+            build()
+            self._build_count += 1
+            self.win.set_loading_progress(self._build_count / 8)
+            self._build_after = self.win.after(8, self._build_next)
+        except Exception as exc:  # noqa: BLE001 - restore the operator page on UI construction failure
+            self.win.destroy()
+            self.app.report_ui_error("Opening Settings", exc)
+
+    def _bind_reflow(self):
+        """Stack form labels over fields when columns no longer fit."""
+        pending = [self.win]
+        while pending:
+            parent = pending.pop()
+            pending.extend(parent.winfo_children())
+            if not isinstance(parent, tk.Frame) or not parent.grid_slaves():
+                continue
+            if getattr(parent, "_reflow_bound", False):
+                continue
+            parent._reflow_bound = True
+            entries = [
+                (child, dict(child.grid_info())) for child in parent.grid_slaves()
+            ]
+
+            def layout(event, parent=parent, entries=entries):
+                if event.widget is not parent:
+                    return
+                if event.width < 60:
+                    # Unmapped categories initially report a one-pixel width.
+                    # Do not rebuild their entire grid for placeholder geometry.
+                    return
+                if getattr(parent, "_reflow_width", None) == event.width:
+                    return
+                parent._reflow_width = event.width
+                narrow = event.width < 580
+                changed = getattr(parent, "_reflow_narrow", None) != narrow
+                parent._reflow_narrow = narrow
+                for child, original in entries:
+                    if not child.winfo_exists():
+                        continue
+                    options = dict(original)
+                    if narrow:
+                        options.update(
+                            row=int(original["row"]) * 2
+                            + (
+                                int(original["column"])
+                                if int(original.get("columnspan", 1)) == 1
+                                else 0
+                            ),
+                            column=0,
+                            columnspan=2,
+                            padx=0,
+                            sticky="ew",
+                        )
+                    if changed:
+                        child.grid_configure(**options)
+                    if isinstance(child, tk.Label):
+                        child.configure(
+                            anchor="w",
+                            wraplength=max(
+                                60, event.width - 24 if narrow else event.width / 2 - 24
+                            ),
+                        )
+                    if changed and isinstance(child, (tk.Entry, ttk.Entry)):
+                        child.configure(width=1)
+
+            parent.bind("<Configure>", layout, add="+")
 
     def _autowrap(self, label, container, margin=0):
         """Wrap ``label`` to its container's current width instead of a constant."""
 
         def update(event=None):
-            width = (event.width if event is not None else container.winfo_width()) - margin
-            if width > 60:
+            width = (
+                event.width if event is not None else container.winfo_width()
+            ) - margin
+            if width > 60 and getattr(label, "_wrap_width", None) != width:
+                label._wrap_width = width
                 label.configure(wraplength=width)
 
         container.bind("<Configure>", update, add="+")
-        self._wrapped.append(label)
         return label
 
     def _button(self, parent, text, command, bg, fg):
-        return tk.Button(
+        return TouchButton(
             parent,
             text=text,
             command=command,
             font=self.font(9, "bold"),
             bg=bg,
             fg=fg,
-            activebackground=bg,
-            activeforeground=fg,
-            relief="flat",
-            bd=0,
-            highlightthickness=0,
             padx=self.px(18),
             pady=self.px(10),
-            cursor="hand2",
         )
 
     def _scroll_tab(self, title):
         tab = tk.Frame(self.tabs, bg=self.app.BG)
-        compact_labels = {"CONNECTOR": "CONNECTION", "STATIONS & FAILURES": self.t("settings_stations")}
+        compact_labels = {
+            "CONNECTOR": "CONNECTION",
+            "STATIONS & FAILURES": self.t("settings_stations"),
+        }
         localized = {
             "GENERAL": self.t("tab_general"),
             "CONNECTOR": self.t("tab_connector"),
@@ -330,26 +505,65 @@ class SettingsWindow:
         return self._scroll_area(tab, self.app.BG)
 
     def _scroll_area(self, parent, background):
-        """A vertically scrollable body that follows its parent's width."""
+        """Touch-paged form with pinned navigation and optional drag/wheel input.
+
+        Existing widgets stay alive: changing pages or resizing never loses edits.
+        A short overlap at page boundaries prevents a cut row becoming unreachable.
+        """
         holder = tk.Frame(parent, bg=background)
         holder.pack(side="left", fill="both", expand=True)
         canvas = tk.Canvas(holder, bg=background, highlightthickness=0)
-        bar = ttk.Scrollbar(
-            holder,
-            orient="vertical",
-            command=canvas.yview,
-            style="Settings.Vertical.TScrollbar",
+        pager = tk.Frame(holder, bg=background, height=max(48, self.px(48)))
+        pager._ft_form_pager = True
+        pager._reflow_bound = True
+        pager.pack(side="bottom", fill="x")
+        pager.pack_propagate(False)
+        caption = tk.Label(
+            pager, bg=background, fg=self.app.MUTED, font=self.font(9, "bold")
         )
+
+        def move(direction):
+            extent = max(1, body.winfo_reqheight())
+            offset = canvas.canvasy(0) + direction * max(44, canvas.winfo_height() - 48)
+            canvas.yview_moveto(max(0, offset) / extent)
+
+        previous = self._button(
+            pager,
+            self.t("settings_previous"),
+            lambda: move(-1),
+            "#EAF1FF",
+            self.app.BLUE,
+        )
+        following = self._button(
+            pager, self.t("settings_next"), lambda: move(1), "#EAF1FF", self.app.BLUE
+        )
+        previous.pack(side="left", fill="y", padx=4, pady=2)
+        following.pack(side="right", fill="y", padx=4, pady=2)
+        caption.pack(fill="both", expand=True)
+
+        def position(first, last):
+            first, last = float(first), float(last)
+            caption.configure(text=f"{round(first * 100)}–{round(last * 100)}%")
+            previous.configure(state="normal" if first > 0.001 else "disabled")
+            following.configure(state="normal" if last < 0.999 else "disabled")
+
         body = tk.Frame(canvas, bg=background)
         window = canvas.create_window((0, 0), window=body, anchor="nw")
-        canvas.configure(yscrollcommand=bar.set)
-        bar.pack(side="right", fill="y", padx=(4, 0))
-        canvas.pack(side="left", fill="both", expand=True)
-        body.bind(
-            "<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
+        canvas.configure(yscrollcommand=position)
+        canvas.pack(fill="both", expand=True)
+
+        def layout(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            needed = body.winfo_reqheight() > holder.winfo_height()
+            if needed and not pager.winfo_manager():
+                pager.pack(side="bottom", fill="x", before=canvas)
+            elif not needed and pager.winfo_manager():
+                pager.pack_forget()
+
+        body.bind("<Configure>", layout)
         canvas.bind(
-            "<Configure>", lambda e: canvas.itemconfigure(window, width=e.width)
+            "<Configure>",
+            lambda e: (canvas.itemconfigure(window, width=e.width), layout()),
         )
         self._scroll_areas.append((canvas, body))
         return body
@@ -361,6 +575,11 @@ class SettingsWindow:
         finger. Inputs keep their own touch behaviour (cursor, selection, lists).
         """
         passive = (tk.Frame, tk.Label, tk.Canvas)
+        self._scroll_areas = [
+            (canvas, body)
+            for canvas, body in self._scroll_areas
+            if canvas.winfo_exists()
+        ]
         for canvas, body in self._scroll_areas:
 
             def wheel(event, canvas=canvas):
@@ -377,6 +596,9 @@ class SettingsWindow:
             while pending:
                 widget = pending.pop()
                 pending.extend(widget.winfo_children())
+                if getattr(widget, "_ft_touch_scroll_bound", False):
+                    continue
+                widget._ft_touch_scroll_bound = True
                 widget.bind("<MouseWheel>", wheel, add="+")
                 widget.bind("<Button-4>", wheel, add="+")
                 widget.bind("<Button-5>", wheel, add="+")
@@ -454,8 +676,9 @@ class SettingsWindow:
                 values = sorted(set(values), key=str.casefold)
             elif var.get() and var.get() not in values:
                 values.insert(0, var.get())
-            widget = ttk.Combobox(
+            widget = TouchChoice(
                 parent,
+                title=label,
                 textvariable=var,
                 values=values,
                 state="normal" if editable or not values else "readonly",
@@ -469,21 +692,20 @@ class SettingsWindow:
                     add="+",
                 )
         else:
-            widget = tk.Entry(
+            widget = ttk.Entry(
                 parent,
                 textvariable=var,
                 font=self.font(10),
                 show="●" if secret else "",
-                relief="flat",
-                bg="#FFFFFF",
-                fg=INPUT_TEXT,
-                insertbackground=INPUT_TEXT,
-                highlightthickness=1,
-                highlightbackground=FIELD_BORDER,
-                highlightcolor=self.app.BLUE,
+                style="Settings.TEntry",
             )
         widget.grid(
-            row=row, column=1, sticky="ew", padx=(16, 0), pady=self.px(3), ipady=self.px(5)
+            row=row,
+            column=1,
+            sticky="ew",
+            padx=(16, 0),
+            pady=self.px(3),
+            ipady=max(self.px(5), (44 - widget.winfo_reqheight() + 1) // 2),
         )
         return widget
 
@@ -508,6 +730,13 @@ class SettingsWindow:
         ):
             self._field(identity, row, label, key)
         workflow = self._section(body, self.t("settings_response_record_defaults"))
+        self._field(
+            identity,
+            3,
+            self.t("settings_reporting_mode"),
+            "reporting_mode",
+            choices=["connected", "local"],
+        )
         self._field(
             workflow,
             0,
@@ -540,6 +769,18 @@ class SettingsWindow:
 
     def _integration_tab(self):
         body = self._scroll_tab("CONNECTOR")
+        budget = self._section(
+            body,
+            self.t("settings_request_budget"),
+            self.t("settings_request_budget_help"),
+        )
+        self._field(
+            budget,
+            0,
+            self.t("settings_requests_per_minute"),
+            "api_requests_per_minute",
+            value=self.app.config.get("api_requests_per_minute") or "",
+        )
         form = self._section(
             body,
             self.t("settings_detected_external_connectors"),
@@ -568,7 +809,9 @@ class SettingsWindow:
             self._autowrap(
                 tk.Label(
                     form,
-                    text=self.t("settings_place_connector_json_connector_json_connector"),
+                    text=self.t(
+                        "settings_place_connector_json_connector_json_connector"
+                    ),
                     font=self.font(8),
                     fg=self.app.MUTED,
                     bg="white",
@@ -707,11 +950,20 @@ class SettingsWindow:
             ("Engineering chat or person", "engineering_chat_name", conversations),
             ("Quality chat or person", "quality_chat_name", conversations),
             ("Production chat or person", "production_chat_name", conversations),
-            ("Common activity chat or person", "common_activity_chat_name", conversations),
-            ("Escalation chat or person (optional)", "escalation_chat_name", conversations),
+            (
+                "Common activity chat or person",
+                "common_activity_chat_name",
+                conversations,
+            ),
+            (
+                "Escalation chat or person (optional)",
+                "escalation_chat_name",
+                conversations,
+            ),
         )
         for field_row, (label, key, choices) in enumerate(rows):
             self._field(routing, field_row, label, key, choices=choices, editable=True)
+        self.build_roster_tools(body)
 
     def _test_selected_connector(self):
         selected = self.connector_selection.get().strip()
@@ -733,22 +985,33 @@ class SettingsWindow:
         self.connector_test_queue = queue.Queue(maxsize=1)
 
         def worker():
-            result = test_connector(candidate, self.app.config, self.app.logger)
+            try:
+                result = test_connector(
+                    candidate,
+                    self.app.config,
+                    self.app.logger,
+                    request_window=self.app._api_request_window,
+                )
+            except Exception:  # noqa: BLE001 - contain worker failures without leaking secrets
+                # Do not expose a transport exception containing credentials.
+                result = ConnectorTestResult(
+                    False,
+                    "Diagnostic could not finish; check the connector and try again.",
+                )
             self.connector_test_queue.put(result)
 
         threading.Thread(target=worker, daemon=True).start()
-        self.win.after(100, self._poll_connector_test)
+        self._connector_test_after = self.win.after(100, self._poll_connector_test)
 
     def _create_connector_wizard(self):
-        dialog = tk.Toplevel(self.win)
-        dialog.title("Create New Basic Connector")
-        dialog.configure(bg=self.app.BG)
-        dialog.transient(self.win)
+        dialog = AppPanel(self.win, background=self.app.BG, border=self.app.BORDER)
+        self.win.update_idletasks()
         dialog.grab_set()
-        width = min(660, max(500, int(self.viewport_width * 0.72)))
-        dialog.geometry(f"{width}x470")
-        shell = tk.Frame(dialog, bg="white")
-        shell.pack(fill="both", expand=True, padx=16, pady=16)
+        width = max(240, self.win.winfo_width() - 64)
+        # Actions remain outside the scrollable form on short displays.
+        buttons = tk.Frame(dialog.content, bg="white")
+        buttons.pack(side="bottom", fill="x", padx=16, pady=(4, 8))
+        shell = self._scroll_area(dialog.content, "white")
         tk.Label(
             shell,
             text=self.t("settings_create_new_basic_connector"),
@@ -791,18 +1054,22 @@ class SettingsWindow:
                 bg="white",
             ).grid(row=row_index, column=0, sticky="w", pady=6)
             if key == "auth":
-                widget = ttk.Combobox(
+                widget = TouchChoice(
                     form,
+                    title=label,
                     textvariable=values[key],
                     values=("Bearer token", "X-API-Key"),
                     state="readonly",
+                    style="Settings.TCombobox",
+                    font=self.font(9),
                 )
             else:
-                widget = tk.Entry(
+                widget = ttk.Entry(
                     form,
                     textvariable=values[key],
                     show="●" if key == "credential" else "",
                     font=self.font(9),
+                    style="Settings.TEntry",
                 )
             widget.grid(row=row_index, column=1, sticky="ew", padx=(12, 0), ipady=5)
         error = tk.StringVar()
@@ -849,21 +1116,26 @@ class SettingsWindow:
             except (DefinitionError, ConfigurationError, OSError) as exc:
                 error.set(str(exc))
 
-        buttons = tk.Frame(shell, bg="white")
-        buttons.pack(fill="x", padx=16, pady=(4, 16))
-        self._button(buttons, self.t("cancel"), dialog.destroy, "#DCE5F0", self.app.TEXT).pack(
-            side="right", padx=(8, 0)
-        )
-        self._button(buttons, self.t("settings_create_test"), create, self.app.BLUE, "white").pack(
-            side="right"
-        )
+        self._enable_touch_scrolling()
+        self._button(
+            buttons, self.t("cancel"), dialog.destroy, "#DCE5F0", self.app.TEXT
+        ).pack(side="right", padx=(8, 0))
+        self._button(
+            buttons, self.t("settings_create_test"), create, self.app.BLUE, "white"
+        ).pack(side="right")
+        self._bind_reflow()
+
+        dialog.present()
 
     def _poll_connector_test(self):
+        self._connector_test_after = None
         try:
             result = self.connector_test_queue.get_nowait()
         except queue.Empty:
             if self.win.winfo_exists():
-                self.win.after(100, self._poll_connector_test)
+                self._connector_test_after = self.win.after(
+                    100, self._poll_connector_test
+                )
             return
         self._connector_test_finished(result)
 
@@ -887,13 +1159,16 @@ class SettingsWindow:
 
     def _stations_tab(self):
         tab = tk.Frame(self.tabs, bg=self.app.BG)
-        self.tabs.add(tab, text=self.t("settings_stations") if self.compact else "STATIONS & FAILURES")
-        shell = tk.Frame(
-            tab, bg="white", highlightthickness=1, highlightbackground=self.app.BORDER
+        self.tabs.add(
+            tab,
+            text=self.t("settings_stations") if self.compact else "STATIONS & FAILURES",
         )
-        shell.pack(fill="both", expand=True, padx=8, pady=8)
+        # Pin station selection/actions to the viewport. Scrolling both columns
+        # anchored those actions below the visible area of a small kiosk.
+        shell = tk.Frame(tab, bg="white")
+        shell.pack(fill="both", expand=True)
         left_width = round(self.viewport_width * (0.34 if self.compact else 0.24))
-        left = tk.Frame(shell, bg="#F5F8FC", width=left_width)
+        left = tk.Frame(shell, bg="#F5F8FC", width=left_width, height=340)
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
         tk.Label(
@@ -905,6 +1180,7 @@ class SettingsWindow:
         ).pack(anchor="w", padx=12, pady=(12, 6))
         # Controls are packed first so a short panel shrinks the list, not them.
         controls = tk.Frame(left, bg="#F5F8FC")
+        controls._reflow_bound = True  # Four short actions already fit in two columns.
         controls.pack(side="bottom", fill="x", padx=8, pady=10)
         actions = (
             ("+ ADD", self.add_station),
@@ -924,7 +1200,7 @@ class SettingsWindow:
         style.configure(
             "Settings.Treeview",
             font=self.font(11, "bold"),
-            rowheight=self.px(36),
+            rowheight=max(44, self.px(36)),
             background="#FFFFFF",
             fieldbackground="#FFFFFF",
             foreground=self.app.TEXT,
@@ -944,16 +1220,47 @@ class SettingsWindow:
             list_frame, show="tree", selectmode="browse", style="Settings.Treeview"
         )
         self.station_list.column("#0", stretch=True)
-        scroll = ttk.Scrollbar(
-            list_frame,
-            orient="vertical",
-            command=self.station_list.yview,
-            style="Settings.Vertical.TScrollbar",
-        )
-        self.station_list.configure(yscrollcommand=scroll.set)
-        self.station_list.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y", padx=(3, 0))
-        right = self._scroll_area(shell, "white")
+        station_pages = tk.Frame(list_frame, bg="#F5F8FC")
+        station_pages._reflow_bound = True
+        station_pages.pack(side="bottom", fill="x")
+        for label, direction in (
+            (self.t("settings_previous"), -1),
+            (self.t("settings_next"), 1),
+        ):
+            self._button(
+                station_pages,
+                label,
+                lambda step=direction: self.station_list.yview_scroll(step, "pages"),
+                "#EAF1FF",
+                self.app.BLUE,
+            ).pack(side="left", fill="x", expand=True, padx=2)
+        self.station_list.pack(fill="both", expand=True)
+        right_holder = tk.Frame(shell, bg="white")
+        right_holder.pack(side="left", fill="both", expand=True)
+        right = self._scroll_area(right_holder, "white")
+
+        def reflow_station(event):
+            if event.widget is not shell:
+                return
+            narrow = event.width < 620
+            # Width matters within the same layout mode too. Otherwise shrinking
+            # from HD leaves an HD-sized station list crowding out the editor.
+            mode = (narrow, event.width, event.height)
+            if getattr(shell, "_station_mode", None) == mode:
+                return
+            shell._station_mode = mode
+            left.pack_forget()
+            right_holder.pack_forget()
+            left.configure(
+                width=event.width if narrow else max(240, round(event.width * 0.3)),
+                height=min(300, max(220, round(event.height * 0.45))),
+            )
+            left.pack(side="top" if narrow else "left", fill="x" if narrow else "y")
+            right_holder.pack(
+                side="top" if narrow else "left", fill="both", expand=True
+            )
+
+        shell.bind("<Configure>", reflow_station, add="+")
         right.configure(padx=18, pady=12)
         tk.Label(
             right,
@@ -985,15 +1292,13 @@ class SettingsWindow:
             fg=self.app.MUTED,
             bg="white",
         ).pack(anchor="w")
-        tk.Entry(
+        ttk.Entry(
             name_form,
             textvariable=self.station_name,
             font=self.font(12, "bold"),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground="#B9C7D8",
-            highlightcolor=self.app.BLUE,
-        ).pack(fill="x", ipady=6, pady=(3, 10))
+            style="Settings.TEntry",
+        ).pack(fill="x", ipady=4, pady=(3, 10))
+        self.group_form(right)
         tk.Label(
             right,
             text=self.t("settings_custom_failure_types"),
@@ -1001,41 +1306,7 @@ class SettingsWindow:
             fg=self.app.MUTED,
             bg="white",
         ).pack(anchor="w")
-        self.failure_vars = [tk.StringVar() for _ in range(4)]
-        for index, var in enumerate(self.failure_vars):
-            row = tk.Frame(right, bg="white")
-            row.pack(fill="x", pady=3)
-            tk.Label(
-                row,
-                text=str(index + 1),
-                font=self.font(9, "bold"),
-                fg=self.app.BLUE,
-                bg="#EAF1FF",
-                width=3,
-                pady=6,
-            ).pack(side="left")
-            tk.Entry(
-                row,
-                textvariable=var,
-                font=self.font(10),
-                relief="flat",
-                highlightthickness=1,
-                highlightbackground="#B9C7D8",
-                highlightcolor=self.app.BLUE,
-            ).pack(side="left", fill="x", expand=True, ipady=6, padx=(7, 0))
-        self._autowrap(
-            tk.Label(
-                right,
-                text=self.t("settings_leave_unused_rows_blank_at_least"),
-                font=self.font(8, "bold"),
-                fg=self.app.GREEN,
-                bg="white",
-                justify="left",
-                anchor="w",
-            ),
-            right,
-            40,
-        ).pack(anchor="w", fill="x", pady=(10, 0))
+        self.build_failure_editor(right)
         self.station_list.bind("<<TreeviewSelect>>", self.select_station)
         self._refresh_station_list(0)
 
@@ -1072,13 +1343,20 @@ class SettingsWindow:
         access = self._section(body, self.t("settings_administrator_access"))
         self.password_status = tk.StringVar(value=self._password_status())
         tk.Label(
-            access, textvariable=self.password_status, font=self.font(9),
-            fg=self.app.TEXT, bg="white", justify="left",
+            access,
+            textvariable=self.password_status,
+            font=self.font(9),
+            fg=self.app.TEXT,
+            bg="white",
+            justify="left",
             wraplength=max(180, self.viewport_width - 120),
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
         self._button(
-            access, self.t("settings_change_password"), self.change_password,
-            self.app.BLUE, "white",
+            access,
+            self.t("settings_change_password"),
+            self.change_password,
+            self.app.BLUE,
+            "white",
         ).grid(row=1, column=0, columnspan=2, sticky="w")
         runtime = self._section(body, self.t("settings_touchscreen_runtime"))
         specs = (
@@ -1086,8 +1364,14 @@ class SettingsWindow:
             (self.t("settings_sound_volume_0_100"), "sound_volume"),
             (self.t("settings_sound_repeat_cooldown_ms"), "sound_cooldown_ms"),
             (self.t("settings_directory_max_pages"), "directory_max_pages"),
-            (self.t("settings_downtime_escalation_minutes_0_disables"), "escalation_minutes"),
-            (self.t("settings_micro_stop_threshold_minutes"), "micro_stop_threshold_minutes"),
+            (
+                self.t("settings_downtime_escalation_minutes_0_disables"),
+                "escalation_minutes",
+            ),
+            (
+                self.t("settings_micro_stop_threshold_minutes"),
+                "micro_stop_threshold_minutes",
+            ),
         )
         for row, (label, key) in enumerate(specs):
             self._field(runtime, row, label, key)
@@ -1142,22 +1426,61 @@ class SettingsWindow:
                 wraplength=max(220, int(self.viewport_width * 0.45)),
                 justify="left",
             ).grid(row=row, column=1, sticky="w", padx=(12, 14), pady=3)
-        logs = self._section(body, self.t("settings_logs_and_storage"))
-        for row, (label, key) in enumerate(
-            (
-                (self.t("settings_log_directory"), "log_directory"),
-                (self.t("settings_log_level"), "log_level"),
-                (self.t("settings_retention_days"), "log_retention_days"),
-                (self.t("settings_filesystem_reserve_mb"), "log_storage_reserve_mb"),
-                (self.t("settings_daily_growth_floor_mb"), "log_daily_growth_floor_mb"),
+        health = self._section(
+            body, self.t("settings_device_care"), self.t("settings_device_care_detail")
+        )
+        report = getattr(self.app, "health_snapshot", {})
+        if report.get("check_error"):
+            summary = report["check_error"]
+        elif report:
+            summary = (
+                f"Free space: {report['free_mb']} MB\n"
+                f"Current audit retention: {report['retention_days']} days\n"
+                f"Audit budget: {report['budget_mb']} MB\n"
+                f"Storage: {'Healthy' if report['enough'] else 'Attention needed'}"
             )
-        ):
-            choices = (
-                ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-                if key == "log_level"
-                else None
+            system = report.get("system", {})
+            if "temperature_c" in system:
+                summary += f"\nDevice temperature: {system['temperature_c']} °C"
+            if "memory_available_mb" in system:
+                summary += f"\nAvailable memory: {system['memory_available_mb']} MB"
+            warnings = list(system.get("warnings", []))
+            if report.get("audit_error"):
+                warnings.append(report["audit_error"])
+            if report.get("audit_write_failures"):
+                warnings.append(
+                    f"Audit write failures since startup: {report['audit_write_failures']}"
+                )
+            if report.get("audit_dropped_records"):
+                warnings.append(
+                    f"Audit queue overflow: {report['audit_dropped_records']} records"
+                )
+            if warnings:
+                summary += "\n" + "\n".join(warnings)
+        else:
+            summary = (
+                "First background health check is pending. Reopen Settings to refresh."
             )
-            self._field(logs, row, label, key, choices=choices)
+        history = getattr(getattr(self.app, "history", None), "health", {})
+        summary += (
+            f"\nLocal incident archive: {history.get('records', 'checking')} records"
+        )
+        summary += f"\nHistory awaiting storage: {len(self.app.state.get('history_pending', []))}"
+        if history.get("error"):
+            summary += "\nHistory storage: attention required"
+        elif history.get("storage_pressure"):
+            summary += "\nHistory storage: older completed records being cleaned"
+        label = tk.Label(
+            health,
+            text=summary,
+            font=self.font(9),
+            fg=self.app.TEXT,
+            bg="white",
+            justify="left",
+            anchor="w",
+        )
+        label.pack(fill="x", padx=4, pady=8)
+        self._autowrap(label, health, 16)
 
     def _password_status(self):
         if self.app.settings_credentials.path.exists():
@@ -1241,10 +1564,9 @@ class SettingsWindow:
         if self.current_station is None or self.current_station >= len(self.stations):
             return
         self.stations[self.current_station] = {
+            **self.store_group(),
             "name": self.station_name.get().strip(),
-            "failures": [
-                var.get().strip() for var in self.failure_vars if var.get().strip()
-            ],
+            "failures": self._collect_failures(),
         }
 
     def _refresh_station_list(self, index=None):
@@ -1266,18 +1588,25 @@ class SettingsWindow:
 
     def _selected_station(self):
         items = self.station_list.get_children()
-        selected = [items.index(item) for item in self.station_list.selection() if item in items]
+        selected = [
+            items.index(item) for item in self.station_list.selection() if item in items
+        ]
         return selected[0] if selected else None
 
     def _load_station(self, index):
         station = self.stations[index]
         self.station_name.set(station["name"])
-        for pos, var in enumerate(self.failure_vars):
-            var.set(station["failures"][pos] if pos < len(station["failures"]) else "")
+        self.group_name.set(station.get("group", self.app.config["line_name"]))
+        self.group_scope.set(
+            self.t("group_whole_line")
+            if station.get("scope") != "group"
+            else self.t("group_only")
+        )
+        self._load_failures(station["failures"])
 
     def select_station(self, _event=None):
         target = self._selected_station()
-        if target is None:
+        if target is None or target == self.current_station:
             return
         if self.current_station is not None and target != self.current_station:
             self._store_station()
@@ -1292,7 +1621,13 @@ class SettingsWindow:
         while name.casefold() in existing:
             number += 1
             name = f"Station {number}"
-        self.stations.append({"name": name, "failures": list(STATION_FAILURE_FALLBACK)})
+        self.stations.append(
+            {
+                "name": name,
+                "failures": list(STATION_FAILURE_FALLBACK),
+                **self.store_group(),
+            }
+        )
         self._refresh_station_list(len(self.stations) - 1)
 
     def remove_station(self):
@@ -1319,6 +1654,9 @@ class SettingsWindow:
         self._refresh_station_list(target)
 
     def save(self):
+        if self.app.busy:
+            self.error.set(self.t("settings_operation_in_progress"))
+            return
         try:
             self._store_station()
             candidate = deepcopy(self.app.config)
@@ -1330,6 +1668,17 @@ class SettingsWindow:
                     # Invisible differences in spacing would make a name that
                     # looks right fail to match the directory.
                     candidate[key] = " ".join(str(candidate[key]).split())
+            budget = str(candidate.get("api_requests_per_minute") or "").strip()
+            if budget and (not budget.isascii() or not budget.isdecimal()):
+                raise ConfigurationError(
+                    "API requests per minute must be a positive whole number"
+                )
+            try:
+                candidate["api_requests_per_minute"] = int(budget) if budget else None
+            except ValueError as exc:
+                raise ConfigurationError(
+                    "API budget is too large to represent; enter a practical positive whole number"
+                ) from exc
             if not candidate.get("line_name"):
                 raise ConfigurationError("Line / machine name cannot be empty")
             numeric_ranges = {
@@ -1337,9 +1686,6 @@ class SettingsWindow:
                 "sound_volume": (0, 100),
                 "sound_cooldown_ms": (0, 5000),
                 "directory_max_pages": (1, 20),
-                "log_retention_days": (1, 730),
-                "log_storage_reserve_mb": (128, 102400),
-                "log_daily_growth_floor_mb": (1, 1024),
                 "escalation_minutes": (0, 1440),
                 "micro_stop_threshold_minutes": (1, 1440),
             }
@@ -1362,10 +1708,40 @@ class SettingsWindow:
             )
             candidate["asset_status_tracking"] = bool(self.asset_status_tracking.get())
             candidate["zones"] = [station["name"].strip() for station in self.stations]
+            candidate["station_groups"] = self.configured_groups()
+            from ..storage.incidents import all_incidents
+
+            if any(all_incidents(self.app.state)) and any(
+                candidate.get(key) != self.app.config.get(key)
+                for key in (
+                    "station_groups",
+                    "zones",
+                    "line_name",
+                    "asset_id",
+                    "location_id",
+                )
+            ):
+                raise ConfigurationError(
+                    "Complete all group incidents before changing the line topology or targets"
+                )
+            if candidate.get("reporting_mode") != self.app.config.get(
+                "reporting_mode", DEFAULT_CONFIG["reporting_mode"]
+            ) and (any(all_incidents(self.app.state)) or self.app.has_queued_sync()):
+                raise ConfigurationError(
+                    "Complete incidents and deliver or reconcile pending updates before switching reporting mode"
+                )
             candidate["station_failure_types"] = {
                 station["name"].strip(): station["failures"]
                 for station in self.stations
             }
+            if (
+                any(all_incidents(self.app.state))
+                and candidate["station_failure_types"]
+                != self.app.config["station_failure_types"]
+            ):
+                raise ConfigurationError(
+                    "Complete all group incidents before editing failure reasons; recorded selections must remain intact"
+                )
             validate_station_failures(candidate)
             for key, text in self.texts.items():
                 value = text.get("1.0", "end-1c").strip()
@@ -1410,6 +1786,13 @@ class SettingsWindow:
             validate_directory_names(candidate)
             validate_config(candidate)
             selected_connector = self.connector_selection.get().strip()
+            active_connector = self.app.connector_inventory.active
+            if any(all_incidents(self.app.state)) and selected_connector != (
+                active_connector.path.name if active_connector else ""
+            ):
+                raise ConfigurationError(
+                    "Complete active group responses before changing the selected connector"
+                )
             if selected_connector:
                 try:
                     self.app.connector_inventory = select_connector(selected_connector)
@@ -1434,7 +1817,9 @@ class SettingsWindow:
                 self.app.notify("All settings saved", "success", 6)
         except StateSaveError as exc:
             # Configuration is written; only reconciling live selections failed.
-            self.error.set(f"Settings saved, but the line state could not be updated: {exc}")
+            self.error.set(
+                f"Settings saved, but the line state could not be updated: {exc}"
+            )
         except ConfigurationError as exc:
             self.error.set(str(exc).replace("\n", "  "))
             self.tabs.select(
@@ -1447,7 +1832,8 @@ class SettingsWindow:
         """Configured names the loaded directory does not contain (advisory only)."""
         teams = {str(name).casefold() for name in self.directory.get("teams", []) or []}
         chats = {
-            str(name).casefold() for name in self.directory.get("conversations", []) or []
+            str(name).casefold()
+            for name in self.directory.get("conversations", []) or []
         }
         missing = []
         for key in DIRECTORY_NAME_KEYS:
@@ -1470,8 +1856,9 @@ class SettingsWindow:
         # as soon as a second locale translated that label.
         app.t = load_translator(candidate.get(UI_LANGUAGE_CONFIG_KEY, "en"))
         app.station_page = 0
-        new_logger = ActivityLogger(candidate)
-        app.reload_connector(new_logger)
+        # Keep one writer for the kiosk lifetime; saving Settings must not leak threads.
+        app.logger.line_name = candidate["line_name"]
+        app.reload_connector(app.logger)
         colors = candidate["ui_colors"]
         app.BG, app.CARD, app.TEXT, app.MUTED = (
             colors["background"],
@@ -1509,7 +1896,6 @@ class SettingsWindow:
             for zone, note in app.state.get("failure_notes", {}).items()
             if zone in cleaned and "Others" in cleaned[zone]
         }
-        app.logger = new_logger
         app.provider.logger = app.logger
         app.save_state()
         app.logger.log(

@@ -6,14 +6,12 @@ exists. File-system administrators remain trusted: this is not an OS login lock.
 
 from __future__ import annotations
 
-import json
-import os
 import re
 import secrets
-import stat
 from pathlib import Path
 
 from .config import write_json
+from .json_file import read_bounded_json
 from .paths import RUNTIME_ROOT
 from .project_profile import hash_settings_password, verify_settings_password
 
@@ -46,26 +44,18 @@ class SettingsCredentials:
                 raise SettingsAuthError(
                     "Settings credential must not be a symbolic link"
                 )
-            descriptor = os.open(
-                self.path,
-                os.O_RDONLY
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_NONBLOCK", 0),
-            )
+            data = read_bounded_json(self.path, max_bytes=4096, private=True)
         except FileNotFoundError:
             return self.initial_hash
+        except (ValueError, UnicodeError) as exc:
+            raise SettingsAuthError(
+                "Settings credential cannot be trusted; restore settings_auth.json from a secure backup"
+            ) from exc
         except OSError as exc:
             raise SettingsAuthError(
                 "Cannot read settings_auth.json; ask the system administrator"
             ) from exc
         try:
-            with os.fdopen(descriptor, "rb") as stream:
-                metadata = os.fstat(stream.fileno())
-                if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 4096:
-                    raise ValueError("invalid credential file")
-                if hasattr(os, "fchmod"):
-                    os.fchmod(stream.fileno(), 0o600)
-                data = json.loads(stream.read(4097))
             if (
                 not isinstance(data, dict)
                 or set(data) != {"schema_version", "settings_password_hash"}

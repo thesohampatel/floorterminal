@@ -935,7 +935,8 @@ a compatible Windows system. Windows builds do not run on Raspberry Pi.
         "Only a salted verifier is saved in private settings_auth.json at the\n"
         "runtime root. Preserve it during upgrades and keep it out of Git/releases.\n"
         "Configure the line, stations, per-station failures, workflow, accessibility,\n"
-        "sound, storage, and retention in protected Settings.\n\n"
+        "sound and appearance in protected Settings. Device care monitors storage\n"
+        "and manages audit-log retention automatically; pending reports are preserved.\n\n"
         "connector.json is the only external integration contract. It is disabled and\n"
         "contains no credential in the release template. Local reporting works without\n"
         "it. Complete Connector v1 through protected Settings or managed deployment only\n"
@@ -981,7 +982,7 @@ def audit(system, architecture):
     project_profile = load_project_profile(PROJECT_PROFILE_FILE)
     project_profile_value = lambda name: str(getattr(project_profile, name))
     artifact = native_artifact(system)
-    forbidden_names = {"response_state.json", "settings_auth.json", "auth_throttle.json", ".DS_Store"}
+    forbidden_names = {"response_state.json", "settings_auth.json", "auth_throttle.json", "records", "incidents.sqlite3", ".DS_Store"}
     notices = RELEASE_DIR / RELEASE_NOTICES
     if not notices.is_file():
         raise BuildError(f"Release is missing mandatory {RELEASE_NOTICES}.")

@@ -74,7 +74,10 @@ source/bytecode, logs, runtime state, local credential verifiers, private plaint
 integrations, and nonempty credentials. No service-specific integration artifacts
 are produced.
 
-The neutral connector demonstrates required idempotency declarations but is not evidence that deployed endpoints honor them. Before enabling response records or asset status, the deployment owner must map the external system's real header, query key, or unique body field and complete the corresponding commit-then-response-loss acceptance tests described in the connector guide.
+The neutral connector illustrates idempotency, not evidence that an endpoint honors
+it. Map a real deduplication header, query, body field or external-reference path,
+or explicitly select hold-on-ambiguity for a native endpoint without that guarantee.
+Complete the [commissioning checks](connector-commissioning.md) before deployment.
 
 ## Build history
 

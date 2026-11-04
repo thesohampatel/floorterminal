@@ -6,10 +6,11 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from ..core.config import write_private
 from ..core.paths import RUNTIME_ROOT
+from .schema import validate_schema
 
 CONNECTOR_FILE = RUNTIME_ROOT / "connector.json"
 
@@ -51,17 +52,51 @@ class IntegrationDefinition:
     def __init__(self, path=None):
         self.path = Path(path or CONNECTOR_FILE)
         try:
-            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+            from ..core.json_file import read_bounded_json
+
+            self.data = read_bounded_json(self.path, max_bytes=2 * 1024 * 1024)
         except OSError as exc:
             raise DefinitionError(f"Cannot read {self.path.name}: {exc}") from exc
         except json.JSONDecodeError as exc:
             raise DefinitionError(
                 f"Invalid {self.path.name} at line {exc.lineno}, column {exc.colno}"
             ) from exc
-        self._validate()
+        except (ValueError, UnicodeError) as exc:
+            raise DefinitionError(f"Cannot trust {self.path.name}: {exc}") from exc
+        self._validate_safely()
 
-    @staticmethod
-    def _validate_idempotency(data, operation, label):
+    @classmethod
+    def from_document(cls, document, name="connector.json"):
+        """Validate a detached document without filesystem writes or HTTP calls."""
+        from copy import deepcopy
+
+        definition = cls.__new__(cls)
+        definition.path = Path(name)
+        definition.data = deepcopy(document)
+        definition._validate_safely()
+        return definition
+
+    def _validate_safely(self):
+        try:
+            self._validate()
+        except DefinitionError:
+            raise
+        except (
+            ValueError,
+            TypeError,
+            KeyError,
+            AttributeError,
+            OverflowError,
+            RecursionError,
+        ) as exc:
+            # Discovery must survive malformed deployment-owned definitions;
+            # never include raw values (which may be credentials) in this error.
+            raise DefinitionError(
+                "Connector definition contains invalid field types or structure"
+            ) from exc
+
+    @classmethod
+    def _validate_idempotency(cls, data, operation, label):
         idempotency = operation.get("idempotency")
         if not isinstance(idempotency, dict):
             raise DefinitionError(
@@ -69,9 +104,9 @@ class IntegrationDefinition:
             )
         location = idempotency.get("location")
         name = idempotency.get("name")
-        if location not in {"header", "query", "body"}:
+        if location not in ("header", "query", "body", "path"):
             raise DefinitionError(
-                f"{label} idempotency location must be header, query, or body"
+                f"{label} idempotency location must be header, query, body, or path"
             )
         if not isinstance(name, str) or not name.strip():
             raise DefinitionError(f"{label} idempotency name cannot be empty")
@@ -83,7 +118,7 @@ class IntegrationDefinition:
             )
         if location == "header" and not re.fullmatch(r"[A-Za-z0-9-]+", name):
             raise DefinitionError(f"{label} idempotency header name is invalid")
-        if location == "header" and name.casefold() in {
+        if location == "header" and name.casefold() in cls.RESERVED_HEADERS | {
             "authorization",
             "content-length",
             "content-type",
@@ -109,6 +144,37 @@ class IntegrationDefinition:
             r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", name
         ):
             raise DefinitionError(f"{label} idempotency body path is invalid")
+        if location == "query" and (
+            name in data["authentication"].get("query", {})
+            or name in operation.get("static_query", {})
+            or name in operation.get("query_aliases", {}).values()
+        ):
+            raise DefinitionError(
+                f"{label} idempotency query conflicts with another field"
+            )
+        if location == "path" and (
+            not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+            or "{" + name + "}" not in operation.get("path", "")
+        ):
+            raise DefinitionError(
+                f"{label} idempotency path must name a URL placeholder"
+            )
+        if operation.get("method") == "GET":
+            raise DefinitionError(f"{label} idempotency is only supported for writes")
+        if location == "body" and operation.get("body", {}).get("encoding") == "none":
+            raise DefinitionError(f"{label} idempotency cannot use a disabled body")
+        if location == "body":
+            prefix = operation.get("body", {}).get("payload_path", "")
+            final_path = ".".join(filter(None, (prefix, name)))
+            for auth_path in data["authentication"].get("body", {}):
+                if (
+                    final_path == auth_path
+                    or final_path.startswith(auth_path + ".")
+                    or auth_path.startswith(final_path + ".")
+                ):
+                    raise DefinitionError(
+                        f"{label} idempotency body conflicts with authentication"
+                    )
 
     @classmethod
     def _validate_header(cls, name, template, label):
@@ -123,8 +189,14 @@ class IntegrationDefinition:
 
     def _validate(self):
         data = self.data
-        if not isinstance(data, dict) or data.get("schema_version") != 1:
+        if (
+            not isinstance(data, dict)
+            or type(data.get("schema_version")) is not int
+            or data["schema_version"] != 1
+        ):
             raise DefinitionError("connector.json must use schema_version 1")
+        if not isinstance(data.get("enabled"), bool):
+            raise DefinitionError("Connector enabled must be true or false")
         for key in (
             "contract",
             "identity",
@@ -156,6 +228,10 @@ class IntegrationDefinition:
                 "Connector protocol must be rest, rpc, oslc, or odata"
             )
         base = str(data["connection"].get("base_url", "")).strip()
+        if "${" in base or any(ord(c) < 33 for c in base):
+            raise DefinitionError(
+                "Connector base_url must be a literal URL without whitespace"
+            )
         timeout = data["connection"].get("timeout_seconds")
         budget = data["connection"].get("requests_per_minute")
         if (
@@ -164,18 +240,19 @@ class IntegrationDefinition:
             or not 3 <= timeout <= 120
         ):
             raise DefinitionError("Connector timeout_seconds must be 3 to 120")
-        if (
-            isinstance(budget, bool)
-            or not isinstance(budget, int)
-            or not 1 <= budget <= 10
-        ):
-            raise DefinitionError("Connector requests_per_minute must be 1 to 10")
+        if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
+            raise DefinitionError(
+                "Connector requests_per_minute must be a positive whole number"
+            )
         if data.get("enabled"):
             parsed = urlparse(base)
+            # Accessing port validates its range and syntax before READY is shown.
+            port = parsed.port
             if (
                 parsed.scheme != "https"
+                or port == 0
                 or not parsed.hostname
-                or parsed.username
+                or parsed.username is not None
                 or parsed.query
                 or parsed.fragment
             ):
@@ -194,12 +271,38 @@ class IntegrationDefinition:
             }:
                 raise DefinitionError("Connector base_url host is not in allowed_hosts")
         operations = data["operations"]
+        if any(not isinstance(raw, dict) for raw in operations.values()):
+            raise DefinitionError("Every connector operation must be an object")
+        # Validate shapes before semantic cross-references access nested values.
+        for section in ("headers", "query", "body", "derived_credentials"):
+            if not isinstance(data["authentication"].get(section, {}), dict):
+                raise DefinitionError(f"Authentication {section} must be an object")
+        for raw in operations.values():
+            for section in (
+                "retry",
+                "headers",
+                "static_query",
+                "query_aliases",
+                "body",
+                "idempotency",
+                "delivery",
+            ):
+                if section in raw and not isinstance(raw[section], dict):
+                    raise DefinitionError(f"Operation {section} must be an object")
+            if not isinstance(raw.get("path"), str):
+                raise DefinitionError("Operation path must be text")
+            if not isinstance(raw.get("query_parameters"), list) or any(
+                not isinstance(value, str) for value in raw["query_parameters"]
+            ):
+                raise DefinitionError("Operation query_parameters must list names")
+            if "body_schema" in raw:
+                validate_schema(raw["body_schema"], DefinitionError)
         diagnostics = data.get("diagnostics", {})
         if not isinstance(diagnostics, dict):
             raise DefinitionError("Connector diagnostics must be an object")
         test_operation = diagnostics.get("test_operation")
         if test_operation:
-            if test_operation not in operations:
+            if not isinstance(test_operation, str) or test_operation not in operations:
                 raise DefinitionError("Connector diagnostic operation does not exist")
             if operations[test_operation].get("method") != "GET":
                 raise DefinitionError("Connector diagnostic operation must use GET")
@@ -234,8 +337,37 @@ class IntegrationDefinition:
                 + ", ".join(invalid_capabilities)
             )
         workflow_operations = data["workflow"].get("operations")
+        targets = data["workflow"].get("group_targets", {})
+        if not isinstance(targets, dict):
+            raise DefinitionError(
+                "workflow.group_targets must map local group IDs to external targets"
+            )
+        for key, target in targets.items():
+            if (
+                not isinstance(key, str)
+                or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", key)
+                or not isinstance(target, dict)
+                or set(target) - {"asset_id", "location_id"}
+            ):
+                raise DefinitionError(
+                    "Invalid group target; use asset_id and/or location_id"
+                )
+            if any(
+                not isinstance(v, str) or len(v) > 200 or (v and not v.isprintable())
+                for v in target.values()
+            ):
+                raise DefinitionError(
+                    "Group target IDs must be short printable strings"
+                )
         if not isinstance(workflow_operations, dict):
             raise DefinitionError("Integration workflow.operations must be an object")
+        if any(
+            not isinstance(value, str) or value not in operations
+            for value in workflow_operations.values()
+        ):
+            raise DefinitionError(
+                "Every workflow operation must name a configured operation"
+            )
         semantic = set()
         if str(subject_id).strip():
             semantic.add("load_user")
@@ -252,14 +384,17 @@ class IntegrationDefinition:
         if data["capabilities"].get("asset_status"):
             semantic.add("create_asset_status")
         if data["capabilities"].get("messaging"):
-            semantic.update(
-                {
-                    "list_users",
-                    "list_conversations",
-                    "send_conversation_message",
-                    "send_user_message",
-                }
+            routes = (
+                ("send_conversation_message", "list_conversations"),
+                ("send_user_message", "list_users"),
             )
+            if not any(send in workflow_operations for send, _ in routes):
+                raise DefinitionError(
+                    "Messaging needs at least one group or person send operation"
+                )
+            for send, listing in routes:
+                if send in workflow_operations:
+                    semantic.update({send, listing})
         missing_semantic = sorted(semantic - set(workflow_operations))
         unknown_targets = sorted(
             str(workflow_operations[name])
@@ -279,15 +414,47 @@ class IntegrationDefinition:
         if data["capabilities"].get("response_records"):
             create_id = workflow_operations.get("create_response_record")
             create_operation = operations.get(create_id, {})
-            self._validate_idempotency(data, create_operation, "Response-record creation")
+            if create_operation.get("delivery") != {"ambiguous_result": "hold"}:
+                self._validate_idempotency(
+                    data, create_operation, "Response-record creation"
+                )
         if data["capabilities"].get("asset_status"):
             create_id = workflow_operations.get("create_asset_status")
             create_operation = operations.get(create_id, {})
-            self._validate_idempotency(data, create_operation, "Asset-status creation")
+            if create_operation.get("delivery") != {"ambiguous_result": "hold"}:
+                self._validate_idempotency(
+                    data, create_operation, "Asset-status creation"
+                )
         for section in ("collections", "objects", "fields", "field_types", "values"):
             if not isinstance(data["workflow"].get(section), dict):
                 raise DefinitionError(f"Connector workflow.{section} must be an object")
-        allowed_field_types = {"string", "integer", "number", "boolean"}
+        for section in ("collections", "objects", "fields"):
+            if any(
+                not isinstance(value, str)
+                for value in data["workflow"][section].values()
+            ):
+                raise DefinitionError(
+                    f"Connector workflow.{section} mappings must be text"
+                )
+        if any(
+            not isinstance(value, dict) for value in data["workflow"]["values"].values()
+        ):
+            raise DefinitionError("Connector workflow.values groups must be objects")
+        allowed_field_types = ("string", "integer", "number", "boolean")
+        fields = data["workflow"]["fields"]
+        keyed_assignees = {"team_assignee_id", "user_assignee_id"} & fields.keys()
+        if keyed_assignees and (
+            len(keyed_assignees) != 2
+            or not all(fields[key].strip() for key in keyed_assignees)
+            or fields["team_assignee_id"] == fields["user_assignee_id"]
+        ):
+            raise DefinitionError(
+                "Keyed assignees require distinct team_assignee_id and user_assignee_id mappings"
+            )
+        if "failure_details" in data["workflow"]["field_types"]:
+            raise DefinitionError(
+                "failure_details is structured data; do not declare a scalar field_type"
+            )
         invalid_field_types = sorted(
             str(name)
             for name, kind in data["workflow"]["field_types"].items()
@@ -303,13 +470,19 @@ class IntegrationDefinition:
                 raise DefinitionError(f"Operation {operation_id} must be an object")
             if not re.fullmatch(r"[a-z][a-z0-9_.-]*", operation_id):
                 raise DefinitionError(f"Invalid operation ID: {operation_id}")
-            if raw.get("method") not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            if raw.get("method") not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
                 raise DefinitionError(f"Invalid method for {operation_id}")
             operation_path = str(raw.get("path", ""))
             if (
                 not operation_path.startswith("/")
                 or operation_path.startswith("//")
                 or "?" in operation_path
+                or "#" in operation_path
+                or "\\" in operation_path
+                or any(ord(c) < 33 for c in operation_path)
+                or any(
+                    part in {".", ".."} for part in unquote(operation_path).split("/")
+                )
             ):
                 raise DefinitionError(f"Invalid path for {operation_id}")
             query_parameters = raw.get("query_parameters")
@@ -318,7 +491,14 @@ class IntegrationDefinition:
                 query_aliases, dict
             ):
                 raise DefinitionError(f"Invalid query definition for {operation_id}")
-            if any(value not in query_parameters for value in query_aliases.values()):
+            if any(not isinstance(name, str) or not name for name in query_parameters):
+                raise DefinitionError(
+                    f"Invalid query parameter name for {operation_id}"
+                )
+            if any(
+                not isinstance(value, str) or value not in query_parameters
+                for value in query_aliases.values()
+            ):
                 raise DefinitionError(
                     f"Query alias for {operation_id} targets an unsupported parameter"
                 )
@@ -327,6 +507,10 @@ class IntegrationDefinition:
                     raise DefinitionError(
                         f"Operation {operation_id} {mapping_name} must be an object"
                     )
+            if set(raw.get("static_query", {})) - set(query_parameters):
+                raise DefinitionError(
+                    f"Operation {operation_id} static query uses an undeclared parameter"
+                )
             for header_name in raw.get("headers", {}):
                 self._validate_header(
                     header_name,
@@ -338,9 +522,40 @@ class IntegrationDefinition:
                 raise DefinitionError(
                     f"Operation {operation_id} body must be an object"
                 )
-            if body.get("encoding", "json") not in {"json", "form", "none"}:
+            if body.get("encoding", "json") not in ("json", "form", "none"):
                 raise DefinitionError(
                     f"Operation {operation_id} has invalid body encoding"
+                )
+            if not isinstance(body.get("static", {}), dict) or not isinstance(
+                body.get("payload_path", ""), str
+            ):
+                raise DefinitionError(
+                    f"Operation {operation_id} has an invalid body envelope"
+                )
+            if "idempotency" in raw:
+                self._validate_idempotency(data, raw, operation_id)
+            if "delivery" in raw and (
+                raw["delivery"] != {"ambiguous_result": "hold"}
+                or raw.get("idempotency")
+                or raw.get("retry", {}).get("safe")
+                or raw["method"] == "GET"
+            ):
+                raise DefinitionError(
+                    f"Operation {operation_id} hold delivery cannot declare safe retries or idempotency"
+                )
+            directory = raw.get("directory", {})
+            if not isinstance(directory, dict) or set(directory) - {"page_size"}:
+                raise DefinitionError(
+                    f"Operation {operation_id} has invalid directory settings"
+                )
+            size = directory.get("page_size", 200)
+            if (
+                isinstance(size, bool)
+                or not isinstance(size, int)
+                or not 1 <= size <= 2000
+            ):
+                raise DefinitionError(
+                    f"Operation {operation_id} directory.page_size must be 1 to 2000"
                 )
             response_path = raw.get("response_body_path", "")
             if not isinstance(response_path, str):
@@ -351,12 +566,19 @@ class IntegrationDefinition:
             if (
                 not isinstance(codes, list)
                 or not codes
-                or any(not isinstance(code, int) for code in codes)
+                or any(
+                    isinstance(code, bool)
+                    or not isinstance(code, int)
+                    or not 200 <= code <= 299
+                    for code in codes
+                )
             ):
                 raise DefinitionError(f"Invalid success codes for {operation_id}")
             retry = raw.get("retry", {})
             if not isinstance(retry, dict):
-                raise DefinitionError(f"Operation {operation_id} retry must be an object")
+                raise DefinitionError(
+                    f"Operation {operation_id} retry must be an object"
+                )
             unknown_retry = set(retry) - {
                 "safe",
                 "retry_on",
@@ -420,18 +642,24 @@ class IntegrationDefinition:
             for key in data["credentials"]
         ):
             raise DefinitionError("Credential field names are invalid")
+        if any(
+            value is not None and not isinstance(value, str)
+            for value in data["credentials"].values()
+        ):
+            raise DefinitionError("Credential values must be text")
         authentication = data["authentication"]
-        if authentication.get("type", "headers") not in {
+        if authentication.get("type", "headers") not in (
             "headers",
             "api_key",
             "basic",
             "bearer",
             "custom",
-        }:
+        ):
             raise DefinitionError("Connector authentication type is unsupported")
         required_credentials = authentication.get("required_credentials", [])
         if not isinstance(required_credentials, list) or any(
-            key not in data["credentials"] for key in required_credentials
+            not isinstance(key, str) or key not in data["credentials"]
+            for key in required_credentials
         ):
             raise DefinitionError("Authentication required_credentials are invalid")
         headers = authentication.get("headers")
@@ -448,7 +676,7 @@ class IntegrationDefinition:
                 item, dict
             ):
                 raise DefinitionError("Derived credential definitions are invalid")
-            if item.get("transform", "none") not in {"none", "base64", "urlencode"}:
+            if item.get("transform", "none") not in ("none", "base64", "urlencode"):
                 raise DefinitionError(
                     f"Derived credential {name} has an invalid transform"
                 )
@@ -491,6 +719,17 @@ class IntegrationDefinition:
             ):
                 raise DefinitionError(
                     "Derived credential uses an unknown source credential"
+                )
+        response = data.get("response", {})
+        if not isinstance(response, dict):
+            raise DefinitionError("Connector response must be an object")
+        for section in ("rate_limit_headers", "error_status_map"):
+            mapping = response.get(section, {})
+            if not isinstance(mapping, dict) or any(
+                not isinstance(value, str) for value in mapping.values()
+            ):
+                raise DefinitionError(
+                    f"Connector response.{section} must map names to text"
                 )
 
     @property

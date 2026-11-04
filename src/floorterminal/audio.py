@@ -21,16 +21,18 @@ class SoundManager:
     """Play only allowlisted local WAV assets without blocking Tk's event loop."""
 
     MAX_PLAY_SECONDS = 5
+    MAX_ACTIVE_PLAYERS = 2
 
     def __init__(self, config, logger=None, asset_directory=None):
         self.logger = logger
         self.asset_directory = Path(
-            asset_directory
-            or Path(__file__).resolve().parent / "assets" / "sounds"
+            asset_directory or Path(__file__).resolve().parent / "assets" / "sounds"
         ).resolve()
         self._lock = threading.Lock()
         self._last_played = {}
         self._processes = set()
+        self._active_players = 0
+        self._closed = False
         self.update(config)
 
     def update(self, config):
@@ -53,23 +55,46 @@ class SoundManager:
             return False
         now = time.monotonic()
         with self._lock:
+            if self._closed or self._active_players >= self.MAX_ACTIVE_PLAYERS:
+                return False
             if not force and now - self._last_played.get(cue, 0) < self.cooldown:
                 return False
+            previous = self._last_played.get(cue)
             self._last_played[cue] = now
-        path = (self.asset_directory / f"{cue}.wav").resolve()
-        if path.parent != self.asset_directory or not path.is_file():
-            self._log("sound_asset_missing", "WARNING", cue=cue)
+            self._active_players += 1
+        try:
+            path = (self.asset_directory / f"{cue}.wav").resolve()
+            if path.parent != self.asset_directory or not path.is_file():
+                raise OSError("Sound asset unavailable")
+            threading.Thread(
+                target=self._bounded_worker,
+                args=(cue, path, selected_volume),
+                name=f"audio-{cue}",
+                daemon=True,
+            ).start()
+        except (OSError, RuntimeError):
+            with self._lock:
+                self._active_players -= 1
+                if previous is None:
+                    self._last_played.pop(cue, None)
+                else:
+                    self._last_played[cue] = previous
+            self._log("sound_unavailable", "WARNING", cue=cue)
             return False
-        threading.Thread(
-            target=self._play_worker,
-            args=(cue, path, selected_volume),
-            name=f"audio-{cue}",
-            daemon=True,
-        ).start()
         return True
 
     def preview(self, volume=None):
         return self.play("support", force=True, volume=volume)
+
+    def _bounded_worker(self, cue, path, volume):
+        try:
+            with self._lock:
+                if self._closed:
+                    return
+            self._play_worker(cue, path, volume)
+        finally:
+            with self._lock:
+                self._active_players -= 1
 
     def _play_worker(self, cue, path, volume):
         try:
@@ -95,7 +120,11 @@ class SoundManager:
             )
             with self._lock:
                 self._processes.add(process)
+                # close() may run between Popen and registration.
+                closed = self._closed
             try:
+                if closed:
+                    process.terminate()
                 process.wait(timeout=self.MAX_PLAY_SECONDS)
             except subprocess.TimeoutExpired:
                 process.kill()
@@ -126,6 +155,7 @@ class SoundManager:
 
     def close(self):
         with self._lock:
+            self._closed = True
             processes = tuple(self._processes)
             self._processes.clear()
         for process in processes:

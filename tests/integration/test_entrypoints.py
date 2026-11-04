@@ -1,5 +1,7 @@
 import importlib
+import tomllib
 import unittest
+from pathlib import Path
 
 
 class EntrypointTests(unittest.TestCase):
@@ -7,9 +9,10 @@ class EntrypointTests(unittest.TestCase):
         app = importlib.import_module("floorterminal.app")
         self.assertTrue(callable(app.main))
 
-    def test_package_version_matches_release(self):
+    def test_package_version_matches_project_metadata(self):
         package = importlib.import_module("floorterminal")
-        self.assertEqual(package.__version__, "1.1.0")
+        metadata = tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text())
+        self.assertEqual(package.__version__, metadata["project"]["version"])
 
     def test_gui_layers_import_without_creating_window(self):
         for name in (

@@ -66,6 +66,7 @@ def touch(instance, key):
 class ErrorPanelTests(unittest.TestCase):
     def test_a_failed_touch_names_the_operation_instead_of_a_generic_render_error(self):
         instance = app()
+        instance.state["status"] = "RUNNING"
 
         def failing_save():
             raise StateSaveError(
@@ -76,18 +77,27 @@ class ErrorPanelTests(unittest.TestCase):
         instance.save_state = failing_save
         instance.open_failure_selection = lambda station: None
         touch(instance, "zone_0")
+        # Station selection is persisted off Tk; the main event pump presents
+        # the worker's failure without pretending that the selection was saved.
+        instance.events.put(instance.events.get(timeout=3))
+        instance.poll_events()
         panel = instance.error_panel
         self.assertEqual(panel["title"], "Line state could not be saved")
-        self.assertEqual(panel["operation"], "Selecting a station")
+        self.assertEqual(panel["operation"], "Saving station selection")
         self.assertIn("work_label", panel["message"])
         self.assertTrue(panel["state_failure"])
         self.assertTrue(
-            any(event == "ui_action_failed" for event, _level, _d in instance.logger.events)
+            any(
+                event == "operation_failed"
+                for event, _level, _d in instance.logger.events
+            )
         )
 
     def test_the_panel_survives_every_redraw_until_it_is_acknowledged(self):
         instance = app()
-        instance.show_error_panel("Completing repair", RuntimeError("Connector refused"))
+        instance.show_error_panel(
+            "Completing repair", RuntimeError("Connector refused")
+        )
         for _frame in range(5):
             instance.animate()
         self.assertEqual(instance.renders, 5)
@@ -102,13 +112,27 @@ class ErrorPanelTests(unittest.TestCase):
     def test_operator_failures_open_the_panel_and_background_failures_do_not(self):
         instance = app()
         instance.events.put(
-            (False, RuntimeError("Response record update rejected"), None, "Completing repair", False)
+            (
+                False,
+                RuntimeError("Response record update rejected"),
+                None,
+                "Completing repair",
+                False,
+            )
         )
         instance.poll_events()
-        self.assertEqual(instance.error_panel["title"], "Completing repair did not finish")
+        self.assertEqual(
+            instance.error_panel["title"], "Completing repair did not finish"
+        )
         instance.dismiss_error_panel()
         instance.events.put(
-            (False, RuntimeError("Network unavailable"), None, "Synchronizing queued updates…", True)
+            (
+                False,
+                RuntimeError("Network unavailable"),
+                None,
+                "Synchronizing queued updates…",
+                True,
+            )
         )
         instance.poll_events()
         self.assertIsNone(instance.error_panel)
@@ -137,17 +161,18 @@ class ErrorPanelTests(unittest.TestCase):
         self.assertEqual(drawn, ["drawing failed"])
         # The animation loop keeps running but no longer paints over it.
         instance.animate()
-        self.assertEqual(instance.root.scheduled[-1][0], 80)
+        self.assertEqual(instance.root.scheduled[-1][0], 250)
         # Any touch acknowledges the static screen and tries again.
         instance.on_release(SimpleNamespace(x=1, y=1))
         self.assertIsNone(instance.error_panel)
 
     def test_controls_have_operator_readable_descriptions(self):
-        self.assertEqual(describe_control("start_engineers"), "Confirming the Engineering crew")
+        self.assertEqual(
+            describe_control("start_engineers"), "Confirming the Engineering crew"
+        )
         self.assertEqual(describe_control("member_2"), "Selecting an engineer")
         self.assertEqual(describe_control("failure_3"), "Choosing a failure type")
         self.assertIn("mystery", describe_control("mystery"))
-
 
 
 class ConfirmationTimestampTests(unittest.TestCase):
@@ -163,13 +188,16 @@ class ConfirmationTimestampTests(unittest.TestCase):
         instance = app()
         instance.confirm_done()
         queued, confirmed = [], []
-        instance.perform = lambda _operation, function, **_kwargs: queued.append(function)
+        instance.perform = lambda _operation, function, **_kwargs: queued.append(
+            function
+        )
         instance.finish_work = lambda stamp: confirmed.append(stamp)
         with patch("floorterminal.app.time.time", return_value=200.0):
             touch(instance, "confirm")
         with patch("floorterminal.app.time.time", return_value=900.0):
             queued[0]()
         self.assertEqual(confirmed, [200.0])
+
 
 if __name__ == "__main__":
     unittest.main()

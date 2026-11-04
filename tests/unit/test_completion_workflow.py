@@ -10,6 +10,7 @@ import json
 import tempfile
 import time
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -145,7 +146,7 @@ class WorkflowHarness(unittest.TestCase):
         app.logger = Logger()
         app.provider = provider or self.provider
         app.config = {
-            **DEFAULT_CONFIG,
+            **deepcopy(DEFAULT_CONFIG),
             "line_name": "Line 1",
             "engineering_team_name": "Maintenance",
             "engineering_chat_name": "Engineering",
@@ -198,16 +199,25 @@ class CompletionPersistenceTests(WorkflowHarness):
         chats = [args[0] for args in self.provider.calls_to("message")]
         self.assertIn("Production", chats)
 
-    def test_idle_state_file_remains_readable_by_the_previous_release(self):
+    def test_idle_state_file_remains_readable_after_local_archive_is_acknowledged(self):
         app = self.app()
         self.start_repair(app)
         app.finish_work()
+        from floorterminal.storage.history import IncidentArchive
+
+        archive = IncidentArchive(self.path.parent / "records")
+        archive.store(app.state["history_pending"])
+        self.assertEqual(len(archive.recent()), 1)
+        app.state["history_pending"] = []
+        app.save_state()
         self.assertLessEqual(set(self.saved()), RELEASE_1_0_FIELDS)
 
     def test_planned_work_label_is_persisted_and_released(self):
         app = self.app()
         app.state["issue_zones"] = ["Station 2"]
-        app.start_planned_work("Preventive Maintenance", "PREVENTIVE", "team-1", MEMBERS)
+        app.start_planned_work(
+            "Preventive Maintenance", "PREVENTIVE", "team-1", MEMBERS
+        )
         restored = StateStore(self.path).data
         self.assertEqual(restored["status"], "ENGINEERING")
         self.assertEqual(restored["work_label"], "Preventive Maintenance")
@@ -220,7 +230,9 @@ class CompletionPersistenceTests(WorkflowHarness):
         self.assertIsNone(restored["work_label"])
         self.assertNotIn("work_label", self.saved())
         release = [
-            args[1] for args in self.provider.calls_to("message") if "RELEASED" in args[1]
+            args[1]
+            for args in self.provider.calls_to("message")
+            if "RELEASED" in args[1]
         ]
         self.assertIn("Work: Preventive Maintenance", release[0])
 
@@ -297,7 +309,9 @@ class AssetStatusNoteTests(WorkflowHarness):
         status, _key, downtime_type, note = self.provider.calls_to("asset")[0]
         self.assertEqual((status, downtime_type), ("OFFLINE", "UNPLANNED"))
         self.assertIn("Affected stations: Station 1, Station 3", note)
-        self.assertIn("Reason: Station 1: Mechanical, Others; Station 3: Electrical", note)
+        self.assertIn(
+            "Reason: Station 1: Mechanical, Others; Station 3: Electrical", note
+        )
         self.assertIn("Operator note: Station 1: Guard door sensor loose", note)
         self.assertIn("Response record: #REC-1", note)
         self.assertNotRegex(note, self.TIME)
@@ -305,7 +319,9 @@ class AssetStatusNoteTests(WorkflowHarness):
     def test_planned_and_restored_notes_state_the_work_and_stations(self):
         app = self.app()
         app.state["issue_zones"] = ["Station 2"]
-        app.start_planned_work("Preventive Maintenance", "PREVENTIVE", "team-1", MEMBERS)
+        app.start_planned_work(
+            "Preventive Maintenance", "PREVENTIVE", "team-1", MEMBERS
+        )
         _status, _key, downtime_type, note = self.provider.calls_to("asset")[0]
         self.assertEqual(downtime_type, "PLANNED")
         self.assertIn("Planned Preventive Maintenance", note)
@@ -352,11 +368,16 @@ class CompletionSynchronizationTests(WorkflowHarness):
         healthy = FakeConnector()
         app = self.app(healthy)
         summary = app.synchronize_due_work(force=True)
-        self.assertEqual(summary, "No external updates remain queued • check activity for delivery details")
+        self.assertEqual(
+            summary,
+            "No external updates remain queued • check activity for delivery details",
+        )
         self.assertIn((record, "DONE"), healthy.calls_to("status"))
         self.assertEqual(healthy.calls_to("asset")[0][0], "ONLINE")
         released = [args[1] for args in healthy.calls_to("message")]
-        self.assertTrue(all("Response record: DONE • Asset: ONLINE" in text for text in released))
+        self.assertTrue(
+            all("Response record: DONE • Asset: ONLINE" in text for text in released)
+        )
         self.assertFalse(app.has_queued_sync())
 
     def test_empty_queue_after_expiry_does_not_claim_delivery(self):
@@ -376,7 +397,9 @@ class CompletionSynchronizationTests(WorkflowHarness):
         self.provider.fail("status", unavailable())
         app.finish_work()
         released = [
-            args[1] for args in self.provider.calls_to("message") if "RELEASED" in args[1]
+            args[1]
+            for args in self.provider.calls_to("message")
+            if "RELEASED" in args[1]
         ]
         self.assertTrue(released)
         for text in released:
@@ -410,7 +433,9 @@ class CompletionSynchronizationTests(WorkflowHarness):
         self.assertTrue(app.logger.named("lifecycle_chat_failed"))
 
         self.provider.failures.clear()
-        with mock.patch.object(workflow_module.time, "monotonic", return_value=time.monotonic() + 3600):
+        with mock.patch.object(
+            workflow_module.time, "monotonic", return_value=time.monotonic() + 3600
+        ):
             self.assertTrue(app.sync_work_due())
         app.flush_messages(force=True)
         self.assertEqual(app.state["pending_messages"], [])
@@ -420,7 +445,8 @@ class CompletionSynchronizationTests(WorkflowHarness):
         app = self.app()
         self.start_repair(app)
         self.provider.fail(
-            "message", RuntimeError('No configured conversation or user named "Production"')
+            "message",
+            RuntimeError('No configured conversation or user named "Production"'),
         )
         app.finish_work()
         for _attempt in range(workflow_module.PERMANENT_FAILURE_ATTEMPTS):
@@ -444,14 +470,17 @@ class CompletionSynchronizationTests(WorkflowHarness):
             app.queue_message("Engineering", f"Message {index}")
         app.save_state()
         self.assertEqual(len(app.state["pending_messages"]), MAX_QUEUED_MESSAGES)
-        self.assertEqual(app.state["pending_messages"][-1]["content"], f"Message {MAX_QUEUED_MESSAGES + 4}")
+        self.assertEqual(
+            app.state["pending_messages"][-1]["content"],
+            f"Message {MAX_QUEUED_MESSAGES + 4}",
+        )
 
 
 class SupportCallTests(WorkflowHarness):
     def run_call(self, app, department="Engineering"):
         results = []
-        app.perform = lambda working, function, on_success=None, **_options: results.append(
-            function()
+        app.perform = lambda working, function, on_success=None, **_options: (
+            results.append(function())
         )
         app.call_team(department)
         return results[0]
@@ -470,7 +499,9 @@ class SupportCallTests(WorkflowHarness):
 
     def test_unknown_chat_is_reported_to_the_operator(self):
         app = self.app()
-        self.provider.fail("message", RuntimeError('No configured conversation named "X"'))
+        self.provider.fail(
+            "message", RuntimeError('No configured conversation named "X"')
+        )
         with self.assertRaisesRegex(RuntimeError, "Engineering was not notified"):
             self.run_call(app)
         self.assertEqual(app.state["pending_messages"], [])
@@ -481,7 +512,9 @@ class SupportCallTests(WorkflowHarness):
             self.run_call(app, "Quality")
 
     def test_every_documented_placeholder_formats_in_every_template(self):
-        placeholders = "{line} {zones} {timestamp} {time} {department} {condition} {work_label}"
+        placeholders = (
+            "{line} {zones} {timestamp} {time} {department} {condition} {work_label}"
+        )
         app = self.app(
             downtime_title_template=placeholders,
             downtime_description_template=placeholders,
@@ -507,10 +540,11 @@ class FailureClassificationTests(unittest.TestCase):
         self.assertEqual(kind(unavailable()), "transient")
         self.assertEqual(kind(IntegrationError("x", "SERVER", 500)), "transient")
         self.assertEqual(kind(IntegrationError("x", "NOT_FOUND", 404)), "permanent")
-        self.assertEqual(kind(IntegrationError("x", "AUTHENTICATION", 401)), "permanent")
+        self.assertEqual(
+            kind(IntegrationError("x", "AUTHENTICATION", 401)), "permanent"
+        )
         self.assertEqual(kind(TimeoutError("read timed out")), "transient")
         self.assertEqual(kind(RuntimeError("No configured conversation")), "permanent")
-
 
 
 class CompletionEvidenceTests(WorkflowHarness):
@@ -530,7 +564,9 @@ class CompletionEvidenceTests(WorkflowHarness):
         messages = healthy.calls_to("message")
         self.assertTrue(messages)
         self.assertTrue(all("DONE not confirmed" in text for _chat, text in messages))
-        self.assertFalse(any("Response record: DONE •" in text for _chat, text in messages))
+        self.assertFalse(
+            any("Response record: DONE •" in text for _chat, text in messages)
+        )
 
     def test_abandoned_done_is_not_reported_as_success(self):
         app = self.pending_completion(IntegrationError("Forbidden", "PERMISSION", 403))
@@ -558,30 +594,39 @@ class CompletionEvidenceTests(WorkflowHarness):
     def test_confirmed_done_evidence_survives_delayed_message_and_restart(self):
         app = self.pending_completion(None)
         self.assertFalse(app.state["pending_record_updates"])
-        self.assertTrue(all(
-            entry["record_status_outcome"] == "confirmed"
-            for entry in StateStore(self.path).data["pending_messages"]
-        ))
+        self.assertTrue(
+            all(
+                entry["record_status_outcome"] == "confirmed"
+                for entry in StateStore(self.path).data["pending_messages"]
+            )
+        )
         healthy = FakeConnector()
         self.app(healthy).flush_messages(force=True)
-        self.assertTrue(all(
-            "Response record: DONE • Asset: ONLINE" in text
-            for _chat, text in healthy.calls_to("message")
-        ))
+        self.assertTrue(
+            all(
+                "Response record: DONE • Asset: ONLINE" in text
+                for _chat, text in healthy.calls_to("message")
+            )
+        )
 
     def test_legacy_message_without_delivery_evidence_is_not_assumed_done(self):
         app = self.app()
-        entry = app.queue_message("Engineering", "Production released", status_record_id="old-record")
+        entry = app.queue_message(
+            "Engineering", "Production released", status_record_id="old-record"
+        )
         entry.pop("record_status_outcome")
         app.save_state()
         self.assert_unconfirmed_after_restart()
 
     def test_invalid_completion_evidence_cannot_be_saved(self):
         app = self.app()
-        entry = app.queue_message("Engineering", "Production released", status_record_id="record")
+        entry = app.queue_message(
+            "Engineering", "Production released", status_record_id="record"
+        )
         entry["record_status_outcome"] = "untrusted"
         with self.assertRaises(StateSaveError):
             app.save_state()
+
 
 if __name__ == "__main__":
     unittest.main()

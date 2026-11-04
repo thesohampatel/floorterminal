@@ -1,5 +1,8 @@
 # Operations and response controls
 
+This guide describes v1.2.0. Older 1.1.0 terminals retain their
+older synchronization behavior until a new release is installed.
+
 ## Sound commissioning
 
 Operational cues supplement the visible status and guidance. Configure enablement,
@@ -10,31 +13,85 @@ state. Do not treat a cue as a safety alarm or external-sync acknowledgement. Se
 
 ## Reporting downtime
 
-Select at least one station or the entire line. Failure presets remain optional. If **Others** is selected, an optional short note appears on the same touchscreen keyboard; skipping it never blocks a report. Touch **Report a Problem**, then use the single deliberate **YES, LINE IS DOWN** confirmation.
+For independent cells, first commission [station groups](station-groups.md).
+The main action controls affect the focused incident. A stopped group's timer
+continues while another group is displayed; completing one does not release the
+others. Confirm the impact preview before recording a stop. Whole-line reporting
+cannot overlap unresolved group incidents.
 
-The terminal records DOWN locally before network work. **SYNC PENDING** remains visible and can be touched for an immediate attempt. Background attempts occur no more than once per minute, reuse the same idempotency key, and log attempt two and later distinctly.
+Select at least one station or the entire line. Failure presets remain optional.
+If **Others** is selected, an optional short note appears on the same touchscreen
+keyboard; skipping it never blocks a report. In v1.2.0, use **Report • Engineering**
+or **Start self-fix** directly on the station sheet. The main reporting control
+also offers Engineering help or operator self-fix; the operator name remains
+optional. See [the short touch paths](operator-touch-flow.md) for exact controls.
+
+The terminal records DOWN and its delivery instructions locally before network
+work. The queued-updates strip opens **Saved updates**. Delivery runs separately
+from operator actions, respects the request budget and service delays, and reuses
+stable idempotency keys. See [offline delivery and recovery](offline-delivery.md).
+
+An operator self-fix starts directly in REPAIRING, with an operator-specific status
+label and no Engineering call. If help becomes necessary, requesting Engineering
+returns to DOWN without changing the incident or original downtime start. The same
+record then follows normal repair and release. See [self-fix and handover](operator-self-fix.md).
 
 ## Starting planned work
 
-Planned work (Preventive Maintenance / Modification) is recorded locally even when the connector is unavailable, with the same idempotency discipline before any response record is created. The terminal freezes the selected stations, failure details, operator, available participants, title, and description with that event. If the roster cannot be fetched offline, the event is queued as not yet assigned and the crew can be selected after synchronization. Until synchronization succeeds, station selection and a second report/planned-work start are blocked so one physical event cannot be mixed with another. If the response is lost or ambiguous, automatic and manual attempts reuse the exact same key. The line remains RUNNING locally until a usable remote response-record ID arrives.
+Planned work enters ENGINEERING locally, with immutable station/failure details,
+available participants and a stable event identifier. A remote record ID is not
+required to start or complete the physical workflow. A cached crew list is usable
+offline; if none exists, explicitly continue without names and update participation
+later. Once the current incident is released, a new incident can be recorded even
+if older delivery instructions remain queued. Each event retains its own identity.
 
 ## Asset state synchronization
 
-When configured, OFFLINE/ONLINE asset-state creation is also persisted before transmission and uses its own stable idempotency key. A timeout therefore retries the same external event instead of creating another status record. An asset-enabled connector is rejected unless its mapped create operation declares a remotely enforced idempotency mechanism. A deployment acceptance test must still prove the external service or gateway actually honors that declaration.
+Group asset IDs are declared in the connector's `workflow.group_targets`, not
+in station display names. Partial group stops never implicitly target the
+aggregate line asset. Shared external assets remain Offline until their last
+affected group releases. Missing group mappings leave local reporting usable
+but send no asset-state change. Review [mapping rules](station-groups.md#connector-mapping).
+
+When configured, OFFLINE/ONLINE events are persisted before transmission, using
+the original stop/confirmed release time rather than the later synchronization
+time. The connector must declare real deduplication or an explicit hold-on-ambiguity
+policy. Safe retries reuse the same event key; uncertain native append-only writes
+remain held. An administrator can verify an existing asset event without resending
+it. See [connector commissioning](connector-commissioning.md) and test these
+semantics in an authorized non-production environment before deployment.
 
 ## Escalation
 
 `escalation_minutes` accepts 0–1440; 0 disables escalation. At the threshold, DOWN is escalated once. If `escalation_chat_name` is set, only that destination is used; otherwise Engineering and common-activity destinations are used. Without messaging capability, the on-screen escalated state and audit record still appear. Repair start clears escalation immediately.
 
 Choose a conservative threshold to avoid alert fatigue and verify escalation routing during deployment acceptance.
+For operator self-fix, escalation waits until Engineering has actually been
+requested, and uses that request time. Direct Engineering arrival is also allowed.
 
 ## Engineering roster
 
 The roster is sorted by local selection frequency and then alphabetically. **Search Names** filters the already-fetched roster locally and never makes another external request. Filtering never clears selections. Reopen the crew control to add or remove engineers during active work.
 
+Cached names show their age. One successful refresh per local day runs after
+midnight when idle; **Settings → Connection → Refresh team members** requests an
+earlier refresh. Opening/searching a saved roster makes no directory request.
+See [daily roster policy and recovery](team-roster.md). Do not use a cached
+selection as an authorization or attendance record. See [crew and connector
+boundaries](offline-delivery.md#connector-changes-and-crew-selection).
+
 ## Completion and analysis
 
 `micro_stop_threshold_minutes` accepts 1–1440. A completed event at or below the threshold is `MICRO-STOP`; a longer event is `DOWNTIME EVENT`. The classification, raw duration, and configured threshold are written to structured logs and lifecycle details.
+
+The response category (operator self-fix, operator then Engineering, or Engineering)
+is separate from this duration classification. An operator-only event can be long.
+
+## Automatic device care
+
+Disk space, bounded audit retention and available Linux health sensors are checked
+in the background. Settings → System shows a read-only snapshot; operators do not
+choose retention or reserve sizes. See [cleanup rules and limits](automatic-device-care.md).
 
 ## Accessibility and language
 

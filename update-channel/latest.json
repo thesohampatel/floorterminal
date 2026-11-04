@@ -1,46 +1,46 @@
 {
   "archive": {
-    "name": "floorterminal-v1.1.0-linux-arm64.tar.gz",
-    "sha256": "e515a9265062f7e3217f8c20a852b42a218c595f262693ebe008cd4ea21ddfae"
+    "name": "floorterminal-v1.2.0-linux-arm64.tar.gz",
+    "sha256": "a9f9473f056eccc4e22bec15870160b80777f14abcc19c4ebd59cff57734225b"
   },
   "document_type": "update_channel",
   "product_id": "floorterminal",
-  "published_utc": "2026-09-29T21:57:58Z",
+  "published_utc": "2026-11-03T13:39:22Z",
   "release": {
     "artifact": {
       "name": "floorterminal",
-      "sha256": "5681cc06e640f7e4343a200241522c600d3d6339da7449ce476cab439fe4da33",
-      "size_bytes": 13963808
+      "sha256": "c11cc784d5f0f9d003d2e79d68e795d1e7607cba6786eaccc910afa1824038f0",
+      "size_bytes": 15263984
     },
     "features": [
-      "Asset Offline and Online notes list the affected stations, reported failure types and the operator's note",
-      "Queued response-record updates and chat notifications survive rate limits, outages and restarts",
-      "A persistent error panel names the failed operation and the saved line status",
-      "Anti-aliased rounded shapes and DPI-independent text on Raspberry Pi displays",
-      "Cleaner, touch-sized Settings with drag scrolling and wrapped descriptions"
+      "Independent production groups with group-only or whole-line stop propagation and concurrent responses",
+      "Operator self-fix with escalation to Engineering on the same incident",
+      "Per-station failure catalogues with automatic Others, touch paging and search",
+      "Daily idle-time roster refresh and a manual Settings refresh with offline saved names",
+      "Configurable request budgets, durable background delivery and standalone incident history",
+      "Adaptive fullscreen kiosk Settings, touch feedback and stable group/conveyor animation"
     ],
     "fixes": [
-      "Completing a repair or planned work no longer fails to save and leaves the terminal inconsistent",
-      "A save that cannot be completed restores the last saved state instead of poisoning later actions",
-      "A retried release keeps the first confirmed release time, so durations do not grow",
-      "Response-record completion, comments, asset status and messages are no longer skipped",
-      "Completion messages preserve delivery evidence and never treat abandoned updates as DONE",
-      "Release timing starts at the affirmative confirmation touch, not when its dialog opens",
-      "Team and chat names can be typed in Settings even when a directory is loaded",
-      "Save and Cancel stay visible in Settings on 800 x 480 panels",
-      "Every documented message-template placeholder formats without error"
+      "Avoid repeated crew-directory requests and preserve cooldown deadlines across restarts",
+      "Retain operator decisions and queued updates through network loss and failed acknowledgements",
+      "Prevent animation item churn and unnecessary redraws beneath static dialogs",
+      "Keep short-screen station actions and Settings Save/Cancel controls reachable",
+      "Preserve complete directory pagination under small API budgets and reject ambiguous recipients",
+      "Keep connector data and newer configuration extensions during supported version changes"
     ],
     "minimum_upgradable_version": "1.0.0",
-    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.1.0",
-    "release_summary": "Reliability release: repair and planned-work completion is saved atomically, every follow-up update and notification is queued and retried, failures are explained precisely, team and chat names are editable, and the touchscreen renders with anti-aliased edges.",
-    "release_title": "FloorTerminal 1.1.0",
-    "released_utc": "2026-09-29T21:57:57Z",
+    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.0",
+    "release_summary": "Local-first production response with independent station groups, operator self-fix and handover, flexible failure reasons, daily saved-team refresh, adaptive kiosk controls and safer offline updates.",
+    "release_title": "FloorTerminal 1.2.0",
+    "released_utc": "2026-11-03T13:39:22Z",
     "security": [
-      "State changes are validated on an isolated snapshot before an atomic write",
-      "Bounded durable queues with expiry and audited abandonment",
-      "Idle state files remain readable by 1.0.0 for safe rollback"
+      "Bounded strict JSON, private state/checkpoints and hardened audit-file handling",
+      "Ambiguous writes require verified idempotency or explicit protected reconciliation",
+      "Read-only update compatibility checks refuse unsafe downgrades without deleting data",
+      "Software probation requires a healthy GUI before confirmation",
+      "Release bundles contain no real connector credentials, saved incidents or private signing material"
     ],
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "schema_version": 1,
   "targets": [

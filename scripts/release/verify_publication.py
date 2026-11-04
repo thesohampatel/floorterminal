@@ -67,7 +67,7 @@ PRIVATE_NAMES = frozenset(
     }
 )
 PRIVATE_PARTS = frozenset(
-    {".venv", "logs", "pi_build_output", "dist", "floorterminal_key"}
+    {".venv", "logs", "records", "pi_build_output", "dist", "floorterminal_key"}
 )
 
 
@@ -104,6 +104,10 @@ def check_paths(paths):
                     ".jsonl",
                     ".log",
                     ".spec",
+                    ".sqlite3",
+                    ".sqlite3-journal",
+                    ".sqlite3-wal",
+                    ".sqlite3-shm",
                 )
             )
             and not path.name.startswith(".env."),

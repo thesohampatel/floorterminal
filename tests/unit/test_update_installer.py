@@ -151,6 +151,19 @@ class ActivationTests(unittest.TestCase):
         with self.assertRaisesRegex(installer.ActivationError, "no longer installed"):
             installer.rollback(self.layout, "9.9.9")
 
+    def test_failed_rollback_journal_save_does_not_switch_the_executable(self):
+        self.stage()
+        installer.activate(self.layout, "1.1.0")
+        installer.confirm(self.layout)
+        with (
+            mock.patch.object(
+                installer, "_persist", side_effect=OSError("storage full")
+            ),
+            self.assertRaises(OSError),
+        ):
+            installer.rollback(self.layout, "1.0.0")
+        self.assertEqual(self.layout.active_version(), "1.1.0")
+
     def test_activation_refuses_an_unmanaged_installation(self):
         flat = self.work / "flat"
         flat.mkdir()
@@ -213,7 +226,8 @@ class ActivationTests(unittest.TestCase):
         self.assertEqual(self.layout.active_version(), "1.0.0")
         self.assertEqual(record.active_version, "1.0.0")
 
-    def test_pruning_keeps_the_active_and_rollback_versions(self):
+    @mock.patch("floorterminal.update.compatibility.probe_target")
+    def test_pruning_keeps_the_active_and_rollback_versions(self, _probe):
         for release in ("1.1.0", "1.2.0", "1.3.0"):
             document = package_document(release, artifact=executable_bytes(release))
             mount = self.work / "media" / release

@@ -42,19 +42,57 @@ class DialogMixin:
         maximum = int(self.modal.get("max_length", 240))
         value = " ".join(self.modal.get("value", "").strip().split())[:maximum]
         previous = self.modal.get("return_modal")
+        if purpose == "operator_name" and previous:
+            previous["name"] = value
+            self.modal = previous
+            return
+        if purpose == "group_search" and previous:
+            previous["filter"] = value
+            self.modal = previous
+            return
+        if purpose == "failure_search" and previous:
+            previous["filter"] = value
+            needle = value.casefold()
+            previous["matches"] = [
+                index
+                for index, option in enumerate(previous["options"][:-1])
+                if needle in option.casefold()
+            ]
+            previous["page"] = 0
+            self.modal = previous
+            return
+        if purpose in {"delivery_link", "delivery_asset_confirm"}:
+            if not value or value.startswith("local:"):
+                self.modal["error"] = (
+                    "Enter the verified external event ID or audit reference"
+                    if purpose == "delivery_asset_confirm"
+                    else "Enter the existing external record ID"
+                )
+                return
+            delivery_id = self.modal.get("delivery_id")
+            self.modal = None
+            self.request_admin_access(purpose)
+            self.modal.update(delivery_id=delivery_id, record_id=value)
+            return
         if purpose == "failure_note":
             station = self.modal["station"]
-            notes = self.state.setdefault("failure_notes", {})
-            if value:
-                notes[station] = value
-            else:
-                notes.pop(station, None)
-            self.save_state()
-            self.logger.log(
-                "failure_note_saved", station=station, note_present=bool(value)
-            )
-            self.modal = None
-            self.notify(f"{station} failure details saved", "success")
+
+            def save():
+                notes = self.state.setdefault("failure_notes", {})
+                if value:
+                    notes[station] = value
+                else:
+                    notes.pop(station, None)
+                self.save_state()
+
+            def saved(_result):
+                self.logger.log(
+                    "failure_note_saved", station=station, note_present=bool(value)
+                )
+                self.modal = None
+                self.notify(f"{station} failure details saved", "success")
+
+            self.perform("Saving failure details", save, saved)
             return
         if purpose == "engineer_search" and previous:
             members = previous.get("full_members", previous.get("members", []))
@@ -63,6 +101,7 @@ class DialogMixin:
                 member
                 for member in members
                 if value.casefold() in member["displayName"].casefold()
+                or value.casefold() in str(member["id"]).casefold()
             ]
             previous["page"] = 0
             self.modal = previous
@@ -73,31 +112,31 @@ class DialogMixin:
             overrides = {}
         configured = overrides.get(station)
         sources = (
-            configured
-            if isinstance(configured, list) and configured
-            else STATION_FAILURE_FALLBACK
+            configured if isinstance(configured, list) else STATION_FAILURE_FALLBACK
         )
-        options = []
+        options, seen = [], set()
         for value in sources:
             label = str(value).strip()
             if (
                 label
                 and label.casefold() not in ("other", "others")
-                and label.casefold() not in {item.casefold() for item in options}
+                and label.casefold() not in seen
             ):
                 options.append(label)
-            if len(options) == 4:
-                break
+                seen.add(label.casefold())
         return options + ["Others"]
 
     def open_failure_selection(self, station):
         options = self.failure_options(station)
+        allowed = set(options)
         current = self.state.setdefault("failure_selections", {}).get(station, [])
         self.modal = {
             "kind": "failures",
             "station": station,
             "options": options,
-            "selected": {value for value in current if value in options},
+            "selected": {value for value in current if value in allowed},
+            "page": 0,
+            "matches": list(range(len(options) - 1)),
         }
         self.logger.log(
             "failure_picker_opened", station=station, option_count=len(options)
@@ -110,47 +149,83 @@ class DialogMixin:
             for option in self.modal["options"]
             if option in self.modal["selected"]
         ]
+
+        def save():
+            self.apply_failure_choices(station, ordered)
+            self.save_state()
+
+        def saved(_result):
+            if "Others" in ordered:
+                self.open_text_input(
+                    "failure_note",
+                    f"OTHER FAILURE • {station}",
+                    "Optional short description • leave blank to continue",
+                    self.state.get("failure_notes", {}).get(station, ""),
+                    max_length=240,
+                )
+                self.modal["station"] = station
+            else:
+                self.modal = None
+            self.notify(
+                f"{station}: {len(ordered)} failure type{'s' if len(ordered) != 1 else ''} selected",
+                "success",
+            )
+            self.logger.log(
+                "failure_selection_saved", station=station, failure_types=ordered
+            )
+
+        self.perform("Saving failure selection", save, saved)
+
+    def apply_failure_choices(self, station, ordered):
+        """Apply a captured draft inside the caller's durable transaction."""
+        if station not in self.selected_zones():
+            raise RuntimeError("This station is no longer selected; choose it again")
         failures = self.state.setdefault("failure_selections", {})
         if ordered:
-            failures[station] = ordered
+            failures[station] = list(ordered)
         else:
             failures.pop(station, None)
-        notes = self.state.setdefault("failure_notes", {})
         if "Others" not in ordered:
-            notes.pop(station, None)
-        self.save_state()
-        if "Others" in ordered:
-            self.open_text_input(
-                "failure_note",
-                f"OTHER FAILURE • {station}",
-                "Optional short description • leave blank to continue",
-                notes.get(station, ""),
-                max_length=240,
-            )
-            self.modal["station"] = station
-        else:
+            self.state.setdefault("failure_notes", {}).pop(station, None)
+
+    def report_from_failure_picker(self, *, self_fix=False):
+        """The labelled report button is the final confirmation, not a wizard."""
+        station = self.modal["station"]
+        choices = [v for v in self.modal["options"] if v in self.modal["selected"]]
+
+        def report():
+            self.apply_failure_choices(station, choices)
+            return self.report_downtime(operator_name="" if self_fix else None)
+
+        def saved(result):
             self.modal = None
-        self.notify(
-            f"{station}: {len(ordered)} failure type{'s' if len(ordered) != 1 else ''} selected",
-            "success",
-        )
-        self.logger.log(
-            "failure_selection_saved", station=station, failure_types=ordered
+            self.notify(result or "Stoppage saved on this terminal", "success", 5)
+
+        self.perform(
+            "Recording operator self-fix" if self_fix else "Reporting stoppage",
+            report,
+            saved,
         )
 
     def remove_failure_station(self):
         station = self.modal["station"]
-        self.state["issue_zones"] = [
-            zone for zone in self.selected_zones() if zone != station
-        ]
-        self.state.setdefault("failure_selections", {}).pop(station, None)
-        self.state.setdefault("failure_notes", {}).pop(station, None)
-        self.modal = None
-        self.save_state()
-        self.notify(f"{station} deselected", "info")
-        self.logger.log(
-            "issue_station_removed", station=station, zones=self.selected_zones()
-        )
+
+        def save():
+            self.state["issue_zones"] = [
+                zone for zone in self.selected_zones() if zone != station
+            ]
+            self.state.setdefault("failure_selections", {}).pop(station, None)
+            self.state.setdefault("failure_notes", {}).pop(station, None)
+            self.save_state()
+
+        def saved(_result):
+            self.modal = None
+            self.notify(f"{station} deselected", "info")
+            self.logger.log(
+                "issue_station_removed", station=station, zones=self.selected_zones()
+            )
+
+        self.perform("Saving station selection", save, saved)
 
     def failure_summary(self, empty="None specified"):
         failures = self.state.get("failure_selections", {})
@@ -166,6 +241,20 @@ class DialogMixin:
         return "; ".join(details) if details else empty
 
     def select_issue_zone(self, zone):
+        if zone != "all":
+            try:
+                station = self.config["zones"][int(zone)]
+            except (ValueError, IndexError):
+                return
+            if self.group_station_touch(station):
+                return
+        if self.state["status"] != "RUNNING":
+            self.notify(
+                "Affected stations are fixed for this incident • complete it before changing scope",
+                "info",
+                6,
+            )
+            return
         if self.state.get("pending_planned_work"):
             self.notify(
                 "Planned work is queued • synchronize or retry it before changing stations",
@@ -176,8 +265,6 @@ class DialogMixin:
         selected = self.selected_zones()
         if zone == "all":
             selected = [] if selected == ["ENTIRE LINE"] else ["ENTIRE LINE"]
-            self.state["failure_selections"] = {}
-            self.state["failure_notes"] = {}
         else:
             try:
                 label = str(self.config.get("zones", [])[int(zone)])
@@ -187,16 +274,25 @@ class DialogMixin:
                 selected = []
             if label not in selected:
                 selected.append(label)
+
+        def save():
+            if zone == "all":
+                self.state["failure_selections"] = {}
+                self.state["failure_notes"] = {}
             self.state["issue_zones"] = selected
             self.save_state()
-            self.open_failure_selection(label)
+
+        def saved(_result):
+            if zone != "all":
+                self.open_failure_selection(label)
+            else:
+                summary = self.zone_summary("No station selected")
+                self.notify(f"Selected: {summary}", "success" if selected else "info")
+                if selected:
+                    self.primary_action()
             self.logger.log("issue_zones_changed", zones=selected)
-            return
-        self.state["issue_zones"] = selected
-        self.save_state()
-        summary = self.zone_summary("No station selected")
-        self.notify(f"Selected: {summary}", "success" if selected else "info")
-        self.logger.log("issue_zones_changed", zones=selected)
+
+        self.perform("Saving station selection", save, saved)
 
     def request_settings_access(self):
         self.request_admin_access("settings")
@@ -204,8 +300,36 @@ class DialogMixin:
     def request_admin_access(self, purpose):
         if self.modal:
             return
+        if self.version_trial_active() and purpose not in {
+            "software_rollback",
+            "exit",
+            "fullscreen",
+            "windowed",
+        }:
+            self.notify(
+                "Version health check • wait for confirmation before editing settings",
+                "info",
+                5,
+            )
+            return
         remaining = self.auth_throttle.remaining()
         labels = {
+            "delivery_retry": (
+                "REVIEW DELIVERY",
+                "Verify the external system before retrying an uncertain write",
+            ),
+            "delivery_archive": (
+                "ACKNOWLEDGE EXPIRED HELP",
+                "This request will be recorded as expired, not sent",
+            ),
+            "delivery_link": (
+                "LINK VERIFIED RECORD",
+                "Only link the existing record for this exact line event",
+            ),
+            "delivery_asset_confirm": (
+                "CONFIRM VERIFIED ASSET EVENT",
+                "Verify the exact asset, state and event time externally; this does not resend the event",
+            ),
             "settings": ("SETTINGS LOCKED", "Identify the administrator to continue"),
             "exit": (
                 "EXIT PROTECTED",
@@ -358,6 +482,8 @@ class DialogMixin:
                 )
                 return
             update_selection = self.modal.get("update_selection")
+            delivery_id = self.modal.get("delivery_id")
+            linked_record_id = self.modal.get("record_id")
             self.modal = None
             self.authorized_admin_identity = administrator
             self.logger.log(
@@ -381,6 +507,22 @@ class DialogMixin:
                 self.install_software_update(administrator, selection=update_selection)
             elif purpose == "software_rollback":
                 self.restore_previous_version(administrator, selection=update_selection)
+            elif purpose == "delivery_retry":
+                self.delivery.retry_reviewed(delivery_id, administrator)
+                self.modal = {"kind": "delivery", "item": 0}
+            elif purpose == "delivery_archive":
+                self.delivery.archive_expired_notice(delivery_id, administrator)
+                self.modal = {"kind": "delivery", "item": 0}
+            elif purpose == "delivery_link":
+                self.delivery.link_reviewed_record(
+                    delivery_id, linked_record_id, administrator
+                )
+                self.modal = {"kind": "delivery", "item": 0}
+            elif purpose == "delivery_asset_confirm":
+                self.delivery.confirm_reviewed_asset(
+                    delivery_id, linked_record_id, administrator
+                )
+                self.modal = {"kind": "delivery", "item": 0}
         else:
             delay = self.auth_throttle.register_failure()
             self.modal["value"] = ""
@@ -399,11 +541,18 @@ class DialogMixin:
             )
 
     def load_settings_directory(self):
+        if getattr(self.provider, "deferred_writes", False):
+            cache = self.delivery.cached_roster()
+            self.open_settings(
+                {"teams": [cache["team_name"]] if cache else [], "conversations": []},
+                deferred=True,
+            )
+            return
         if not self.provider.connected or not (
             self.provider.INFO.supports_team_directory
             or self.provider.INFO.supports_messaging
         ):
-            self.open_settings({"teams": [], "conversations": []})
+            self.open_settings({"teams": [], "conversations": []}, deferred=True)
             return
 
         def fetch():
@@ -416,5 +565,5 @@ class DialogMixin:
         self.perform(
             f"Fetching {self.provider.INFO.display_name} directory…",
             fetch,
-            self.open_settings,
+            lambda directory: self.open_settings(directory, deferred=True),
         )

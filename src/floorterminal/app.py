@@ -8,11 +8,14 @@ import threading
 import time
 import tkinter as tk
 import traceback
+from contextlib import nullcontext
 from datetime import datetime
 from importlib.resources import as_file, files
 
 from .audio import SoundManager
 from .controller.dialogs import DialogMixin
+from .controller.groups import GroupWorkflowMixin
+from .controller.operator import OperatorResponseMixin
 from .controller.updates import SoftwareUpdateMixin
 from .controller.workflow import WorkflowMixin
 from .core.auth_throttle import PersistentAuthThrottle
@@ -26,24 +29,26 @@ from .core.project_profile import (
     ProjectProfileError,
     load_project_profile,
 )
+from .core.rate_policy import RequestWindow, request_budget
 from .core.settings_auth import SettingsCredentials
 from .i18n import load_translator
 from .integration import discover_connectors
 from .services import ExternalIntegration, NoIntegrationProvider
+from .services.delivery import DeferredIntegration, DeliveryCoordinator
+from .services.history import HistoryCoordinator
 from .storage.audit import ActivityLogger
 from .storage.state import StateIntegrityError, StateSaveError, StateStore
+from .ui.panels import AppPanel
 from .ui.responsive import (
-    DESIGN_HEIGHT,
-    DESIGN_WIDTH,
     ResponsiveCanvas,
     fitted_window_geometry,
 )
 from .ui.settings import SettingsWindow
-from .ui.view import RESPONDER_PAGE_SIZE, OperatorViewMixin
+from .ui.view import OperatorViewMixin
 from .update import UpdateService
 
 #: Tk sizes fonts in points and converts them with the X server's reported DPI.
-#: The 800x480 design and its layout tests assume 96 DPI, so X11 displays are
+#: Logical layout units and point-based font metrics share a 96 DPI baseline; X11 displays are
 #: pinned to it; otherwise a panel reporting its physical size (for example a
 #: 7-inch DSI display at ~130 DPI) enlarges every label relative to its shape.
 DESIGN_POINTS_PER_PIXEL = 96 / 72
@@ -52,6 +57,13 @@ DESIGN_POINTS_PER_PIXEL = 96 / 72
 #: operator and the audit log identify the operation instead of a generic error.
 CONTROL_DESCRIPTIONS = {
     "primary": "Main workflow action",
+    "operator_self_fix": "Choosing operator self-fix",
+    "operator_name": "Recording the operator name",
+    "operator_start": "Starting operator self-fix",
+    "operator_options": "Opening operator response options",
+    "operator_help": "Requesting Engineering for this incident",
+    "operator_arrived": "Handing this incident to Engineering",
+    "operator_done": "Completing operator self-fix",
     "confirm": "Confirmation",
     "cancel": "Closing a dialog",
     "start_engineers": "Confirming the Engineering crew",
@@ -71,9 +83,13 @@ CONTROL_DESCRIPTIONS = {
     "failure_remove": "Deselecting a station",
     "failure_all": "Selecting all failure types",
     "failure_clear": "Clearing failure types",
+    "failure_report": "Reporting the selected station faults",
+    "failure_self_fix": "Starting operator self-fix for the selected faults",
+    "members_mode": "Choosing single or multiple crew selection",
     "members_search": "Filtering the Engineering team",
-    "members_prev": "Paging the Engineering team",
-    "members_next": "Paging the Engineering team",
+    "operator_details": "Adding optional operator details",
+    "operator_request": "Requesting Engineering for the active incident",
+    "operator_join": "Recording Engineering arrival",
     "stations_prev": "Paging stations",
     "stations_next": "Paging stations",
     "pwd_enter": "Submitting the keyboard entry",
@@ -97,7 +113,14 @@ def describe_control(key):
     return f"Touch control {key!r}" if key else "Screen update"
 
 
-class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, OperatorViewMixin):
+class FloorTerminalApp(
+    GroupWorkflowMixin,
+    OperatorResponseMixin,
+    WorkflowMixin,
+    DialogMixin,
+    SoftwareUpdateMixin,
+    OperatorViewMixin,
+):
     """Custom-drawn line reporting console optimized for touch and glanceability."""
 
     BG, CARD, TEXT, MUTED = "#F3F5F9", "#FFFFFF", "#14213D", "#718096"
@@ -113,7 +136,9 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
     def __init__(self, root, project_profile=None):
         self.root = root
         self.project_profile = project_profile or load_project_profile()
-        self.settings_credentials = SettingsCredentials(self.project_profile.settings_password_hash)
+        self.settings_credentials = SettingsCredentials(
+            self.project_profile.settings_password_hash
+        )
         self.config = load_config()
         self.t = load_translator(self.config.get("ui_language", "en"))
         colors = self.config["ui_colors"]
@@ -129,7 +154,7 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             colors["purple"],
             colors["border"],
         )
-        self.logger = ActivityLogger(self.config)
+        self.logger = ActivityLogger(self.config, background=True)
         self.sound = SoundManager(self.config, self.logger)
         self.brand_images = self._load_brand_images()
         # The update subsystem is additive: construction, reconciliation, and every
@@ -169,6 +194,7 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         self.ui_context = ""
         self.toast_text, self.toast_kind, self.toast_until = "", "info", 0
         self.animation_start = time.monotonic()
+        self.last_operator_activity = time.monotonic()
         self.pressed = None
         self.station_page = 0
         self.api_limit_warning_active = False
@@ -178,6 +204,10 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         self.escalation_deadline = None
         self.authorized_admin_identity = ""
         self.reload_connector()
+        self.delivery = DeliveryCoordinator(self)
+        self.migrate_active_scope()
+        self.validate_active_topology()
+        self.history = HistoryCoordinator(self)
         self.logger.log(
             "application_started",
             platform=platform.platform(),
@@ -191,7 +221,9 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             integration_ready=self.provider.connected,
         )
 
-        root.title(f"{self.project_profile.product_name} • {self.provider.INFO.display_name}")
+        root.title(
+            f"{self.project_profile.product_name} • {self.provider.INFO.display_name}"
+        )
         root.configure(bg=self.BG)
         self.font_scaling = self.pin_font_scaling(root)
         root.report_callback_exception = self.callback_error
@@ -208,11 +240,10 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         root.bind("<Escape>", self.request_windowed_access)
         root.bind("<F11>", self.request_fullscreen_toggle)
         root.bind("<Key>", self.on_keypress)
+        root.bind("<ButtonPress-1>", self.note_operator_activity, add="+")
         root.protocol("WM_DELETE_WINDOW", self.close_application)
         self.canvas = ResponsiveCanvas(
             root,
-            logical_width=DESIGN_WIDTH,
-            logical_height=DESIGN_HEIGHT,
             width=width,
             height=height,
             bg=self.BG,
@@ -220,6 +251,7 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             highlightthickness=0,
         )
         self.canvas.aa_backdrop = self.BG
+        self.canvas.adaptive = True
         self.canvas.set_viewport(width, height)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", self.on_canvas_resize)
@@ -252,7 +284,9 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
                 )
             return DESIGN_POINTS_PER_PIXEL
         except (tk.TclError, ValueError) as exc:
-            self.logger.log("display_font_scaling_unavailable", "WARNING", error=str(exc))
+            self.logger.log(
+                "display_font_scaling_unavailable", "WARNING", error=str(exc)
+            )
             return None
 
     def _load_brand_images(self):
@@ -270,12 +304,22 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
 
     def reload_connector(self, logger=None):
         """Rescan deployment files and activate the safely selected connector."""
+        if not hasattr(self, "_api_request_window"):
+            self._api_request_window = RequestWindow()
         self.connector_inventory = discover_connectors()
         active = self.connector_inventory.active
+        connection = (
+            active.definition.data["connection"] if active and active.definition else {}
+        )
+        self._api_request_window.set_budget(request_budget(self.config, connection))
         active_logger = logger or getattr(self, "logger", None)
         # Inventory keeps disabled drafts visible in Settings, but their declared
         # capabilities must not advertise operational actions on the kiosk.
-        if active and active.ready:
+        if (
+            active
+            and active.ready
+            and self.config.get("reporting_mode", "connected") != "local"
+        ):
             self.provider = ExternalIntegration(
                 self.config,
                 active_logger,
@@ -283,6 +327,13 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             )
         else:
             self.provider = NoIntegrationProvider(self.config, active_logger)
+        # A Settings save or connector switch must not reset this terminal's
+        # rolling request window. Old in-flight clients keep the same lock/deque.
+        client = getattr(self.provider, "client", None)
+        if client is not None:
+            client.bind_request_window(self._api_request_window)
+        if hasattr(self, "state_store"):
+            self.provider = DeferredIntegration(self, self.provider)
         if hasattr(self, "root"):
             self.root.title(
                 f"{self.project_profile.product_name} • {self.provider.INFO.display_name}"
@@ -290,8 +341,38 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         return self.provider
 
     def on_canvas_resize(self, event):
+        # A touch spanning a resize must not activate a newly repositioned item.
+        self.pressed = None
+        self.touch_feedback = None
         self.canvas.set_viewport(event.width, event.height)
-        self.render()
+        self.request_render()
+
+    def request_render(self):
+        """Coalesce main-thread input/resize events into one immediate repaint."""
+        if getattr(self, "_closing", False):
+            return
+        if getattr(self, "_render_after", None) is not None:
+            return
+
+        def repaint():
+            self._render_after = None
+            self.safe_render()
+            # A static sheet's one-second fallback must not strand a newly
+            # accepted touch ring or busy indicator. Wake the existing timer,
+            # never create a second animation chain.
+            scheduled = getattr(self, "_animation_after", None)
+            if scheduled is not None and (
+                getattr(self, "touch_feedback", None)
+                or self.busy
+                or time.monotonic() < getattr(self, "_page_transition_until", 0)
+            ):
+                self.root.after_cancel(scheduled)
+                self._animation_after = self.root.after(
+                    int(self.config.get("animation_interval_ms", 33)), self.animate
+                )
+
+        if hasattr(getattr(self, "root", None), "after_idle"):
+            self._render_after = self.root.after_idle(repaint)
 
     def fetch_api_identity(self):
         try:
@@ -327,32 +408,105 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             self.api_limit_warning_active = False
 
     def check_storage_capacity(self):
-        try:
-            self.logger.prune()
-            report = self.logger.storage_capacity()
-            level = "INFO" if report["enough"] else "WARNING"
-            self.logger.log("log_storage_capacity_checked", level, **report)
-            if not report["enough"]:
-                self.storage_warning_active = True
-                self.notify(
-                    f"LOW STORAGE • {report['free_mb']} MB free; {report['required_mb']} MB recommended",
-                    "error",
-                    15,
+        if getattr(self, "_closing", False):
+            return
+        # One background job owns maintenance; it never owns the UI busy flag.
+        if getattr(self, "_storage_check_running", False):
+            self.root.after(60_000, self.check_storage_capacity)
+            return
+        self._storage_check_running = True
+        logger = self.logger
+
+        def worker():
+            report = None
+            try:
+                logger.prune()
+                report = logger.storage_capacity()
+                from .services.health import system_observations
+
+                report["system"] = system_observations()
+                logger.log(
+                    "log_storage_capacity_checked",
+                    "INFO" if report["enough"] else "WARNING",
+                    **report,
                 )
-            else:
-                self.storage_warning_active = False
-        except OSError as exc:
-            self.logger.log(
-                "log_storage_capacity_check_failed", "WARNING", error=str(exc)
+            except Exception as exc:
+                logger.log(
+                    "log_storage_capacity_check_failed", "WARNING", error=str(exc)
+                )
+                report = {
+                    "check_error": "Automatic storage checks are unavailable; check device storage and permissions"
+                }
+            finally:
+                self.events.put((True, report, self._storage_capacity_checked))
+
+        try:
+            threading.Thread(target=worker, name="device-care", daemon=True).start()
+        except (OSError, RuntimeError):
+            self._storage_check_running = False
+            self._storage_capacity_checked(
+                {
+                    "check_error": "Automatic storage checks could not start; retrying in one minute"
+                }
             )
         finally:
-            # Recheck during continuous multi-month operation without generating API traffic.
-            self.root.after(6 * 60 * 60 * 1000, self.check_storage_capacity)
+            self.root.after(60_000, self.check_storage_capacity)
+
+    def _storage_capacity_checked(self, report):
+        self._storage_check_running = False
+        if report is None:
+            return
+        previous = getattr(self, "health_snapshot", {})
+        self.health_snapshot = report
+        if report.get("check_error"):
+            if previous.get("check_error") != report["check_error"]:
+                self.notify(f"DEVICE CARE • {report['check_error']}", "error", 10)
+            return
+        was_low = getattr(self, "storage_warning_active", False)
+        self.storage_warning_active = not report["enough"]
+        if not report["enough"] and not was_low:
+            self.notify(
+                f"LOW STORAGE • {report['free_mb']} MB free; {report['required_mb']} MB recommended",
+                "error",
+                15,
+            )
+        warnings = report.get("system", {}).get("warnings", [])
+        warning = report.get("audit_error") or (warnings[0] if warnings else "")
+        previous_warnings = previous.get("system", {}).get("warnings", [])
+        previous_warning = previous.get("audit_error") or (
+            previous_warnings[0] if previous_warnings else ""
+        )
+        if warning and warning != previous_warning and report["enough"]:
+            self.notify(f"DEVICE CARE • {warning}", "error", 10)
 
     def close_application(self):
+        if self._close_settings_panel():
+            return
         self.request_admin_access("exit")
+        self.request_render()
+
+    def _close_settings_panel(self):
+        """Close only the top app-owned page; never reveal the desktop."""
+        if not getattr(self, "settings_visible", False):
+            return False
+        current = self.root.grab_current()
+        if isinstance(current, AppPanel):
+            current.destroy()
+        else:
+            self.settings_window.win.destroy()
+        return True
 
     def _shutdown(self, administrator):
+        if getattr(self, "history", None):
+            self.history.close()
+        if getattr(self, "delivery", None):
+            self.delivery.close()
+        self._closing = True
+        for name in ("_animation_after", "_render_after"):
+            callback = getattr(self, name, None)
+            if callback is not None:
+                self.root.after_cancel(callback)
+                setattr(self, name, None)
         self.logger.log(
             "application_stopped",
             state=self.state.get("status"),
@@ -361,21 +515,31 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         )
         self.stop_update_service()
         self.sound.close()
+        self.logger.close()
         self.root.destroy()
 
     def request_windowed_access(self, _event=None):
+        if self._close_settings_panel():
+            return "break"
         if bool(self.root.attributes("-fullscreen")):
             self.request_admin_access("windowed")
+            self.request_render()
         return "break"
 
     def request_fullscreen_toggle(self, _event=None):
+        if getattr(self, "settings_visible", False):
+            return "break"
         purpose = (
             "windowed" if bool(self.root.attributes("-fullscreen")) else "fullscreen"
         )
         self.request_admin_access(purpose)
+        self.request_render()
         return "break"
 
     def finish_startup(self):
+        if self.version_trial_active():
+            self.modal = {"kind": "update", "page": "status"}
+            self._trial_announced = True
         self.root.deiconify()
         self.root.lift()
         self.render()
@@ -384,7 +548,9 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             "fullscreen_on_linux", True
         ):
             self.root.after(150, lambda: self.root.attributes("-fullscreen", True))
-        self.root.after(int(self.config.get("animation_interval_ms", 80)), self.animate)
+        self._animation_after = self.root.after(
+            int(self.config.get("animation_interval_ms", 33)), self.animate
+        )
         try:
             self.update_service.start()
         except Exception as exc:
@@ -417,7 +583,9 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         )
         self.show_error_panel(
             context,
-            exc_value if isinstance(exc_value, Exception) else RuntimeError(str(exc_value)),
+            exc_value
+            if isinstance(exc_value, Exception)
+            else RuntimeError(str(exc_value)),
             unexpected=True,
         )
         self.safe_render()
@@ -473,24 +641,47 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         try:
             self.canvas.delete("all")
             self.hitboxes = {}
-            self.canvas.create_rectangle(0, 0, 800, 480, fill="#FDECEC", outline="")
-            self.canvas.create_text(
-                400, 150, text=panel.get("title", "The screen could not be drawn"),
-                font=self.font(20, "bold"), fill="#B42331", anchor="center",
+            width = self.canvas.logical_width
+            height = self.canvas.logical_height
+            self.canvas.create_rectangle(
+                0, 0, width, height, fill="#FDECEC", outline=""
             )
             self.canvas.create_text(
-                400, 200, text=f"During: {panel.get('operation', 'Screen update')}",
-                font=self.font(11, "bold"), fill="#14213D", anchor="center",
+                width / 2,
+                height * 0.2,
+                text=panel.get("title", "The screen could not be drawn"),
+                font=self.font(14, "bold"),
+                fill="#B42331",
+                width=max(1, width - 32),
+                anchor="center",
             )
             self.canvas.create_text(
-                400, 250, text=panel.get("message") or f"{exc.__class__.__name__}: {exc}",
-                font=self.font(10), fill="#14213D", width=640, anchor="center",
+                width / 2,
+                height * 0.35,
+                text=f"During: {panel.get('operation', 'Screen update')}",
+                font=self.font(10, "bold"),
+                fill="#14213D",
+                width=max(1, width - 32),
+                anchor="center",
             )
             self.canvas.create_text(
-                400, 320,
+                width / 2,
+                height * 0.52,
+                text=(panel.get("message") or f"{exc.__class__.__name__}: {exc}")[:180],
+                font=self.font(9),
+                fill="#14213D",
+                width=max(1, width - 32),
+                anchor="center",
+            )
+            self.canvas.create_text(
+                width / 2,
+                height * 0.8,
                 text="The saved line state is unchanged. Touch anywhere to try again; "
                 "if this screen returns, note the time and contact support.",
-                font=self.font(9), fill="#4A5568", width=620, anchor="center",
+                font=self.font(9),
+                fill="#4A5568",
+                width=max(1, width - 32),
+                anchor="center",
             )
         except Exception:
             traceback.print_exc()
@@ -499,21 +690,28 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         status = self.state["status"]
         started = (
             self.state.get("repair_at")
-            if status == "REPAIRING"
+            if status == "REPAIRING" and not self.state.get("operator_response")
             else self.state.get("started_at")
         )
         return max(0, int(time.time() - (started or time.time())))
 
+    def note_operator_activity(self, _event=None):
+        self.last_operator_activity = time.monotonic()
+
     def on_press(self, event):
+        self.note_operator_activity()
         if self.render_blocked:
             return
         x, y = self.canvas.to_logical(event.x, event.y)
         for key, box in reversed(list(self.hitboxes.items())):
             if box[0] <= x <= box[2] and box[1] <= y <= box[3]:
                 self.pressed = key
+                self.touch_feedback = (x, y, time.monotonic())
+                self.request_render()
                 break
 
     def on_keypress(self, event):
+        self.note_operator_activity()
         if self.error_panel or self.render_blocked:
             if event.keysym in ("Return", "KP_Enter"):
                 self.dismiss_error_panel()
@@ -523,8 +721,12 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             self._handle_keypress(event)
         except Exception as exc:
             self.report_ui_error("Typing on the keyboard", exc)
+        finally:
+            self.request_render()
 
     def _handle_keypress(self, event):
+        if self.busy:
+            return
         if not self.modal or self.modal.get("kind") not in {"password", "text_input"}:
             return
         if event.keysym in ("Return", "KP_Enter"):
@@ -557,6 +759,7 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             self.report_ui_error(describe_control(key), exc)
         finally:
             self.ui_context = ""
+            self.request_render()
 
     def report_ui_error(self, operation, exc):
         """Log a failed touch action with its control and explain it on screen."""
@@ -578,6 +781,31 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             return
         box = self.hitboxes[key]
         if not (box[0] <= x <= box[2] and box[1] <= y <= box[3]):
+            return
+        if self.busy and key not in {
+            "error_dismiss",
+            "ui_feedback",
+            "ui_page_prev",
+            "ui_page_next",
+        }:
+            self.notify("Saving local changes • please wait", "info", 4)
+            return
+        if self.version_trial_active() and not (
+            key in {"software_update", "about", "cancel", "error_dismiss"}
+            or key.startswith(("update_", "pwd_", "ui_page_"))
+        ):
+            self.notify(
+                "Version health check • wait for confirmation before reporting",
+                "info",
+                5,
+            )
+            return
+        if key.startswith("operator_"):
+            if not self.busy and not self.error_panel:
+                self.handle_layout_control(key)
+            return
+        if key.startswith("ui_"):
+            self.handle_layout_control(key)
             return
         if self.error_panel:
             if key == "error_dismiss":
@@ -620,22 +848,15 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             elif key.startswith("update_"):
                 self.handle_update_control(key.removeprefix("update_"))
             elif key.startswith("member_"):
-                index = int(key.split("_")[1])
-                page = self.modal.get("page", 0)
-                member = self.modal["members"][page * RESPONDER_PAGE_SIZE + index]
-                selected = self.modal["selected"]
-                if member["id"] in selected:
-                    selected.remove(member["id"])
-                else:
-                    selected.add(member["id"])
-            elif key == "members_prev":
-                self.modal["page"] = max(0, self.modal.get("page", 0) - 1)
-            elif key == "members_next":
-                pages = max(
-                    1,
-                    -(-len(self.modal["members"]) // RESPONDER_PAGE_SIZE),
-                )
-                self.modal["page"] = min(pages - 1, self.modal.get("page", 0) + 1)
+                self.choose_engineer(int(key.split("_")[1]))
+            elif key == "members_mode":
+                self.modal["batch"] = not self.modal.get("batch", False)
+                if not self.modal["batch"]:
+                    self.modal["selected"] = (
+                        set(map(str, self.state.get("engineer_ids", [])))
+                        if self.modal["context"]["kind"] == "edit"
+                        else set()
+                    )
             elif key == "members_search":
                 previous = self.modal
                 self.open_text_input(
@@ -701,6 +922,9 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
                         if self.state.get("status") == "ENGINEERING"
                         else "Completing repair",
                         lambda: self.finish_work(requested_at),
+                        before_transaction=lambda: self.capture_release_confirmation(
+                            requested_at
+                        ),
                     )
             elif key.startswith("failure_"):
                 action = key.removeprefix("failure_")
@@ -714,12 +938,25 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
                     selected.update(self.modal["options"])
                 elif action == "clear":
                     selected.clear()
+                elif action in {"previous", "next"}:
+                    self.modal["page"] = max(
+                        0, self.modal.get("page", 0) + (1 if action == "next" else -1)
+                    )
+                elif action == "search":
+                    previous = self.modal
+                    self.open_text_input(
+                        "failure_search",
+                        "FIND A FAILURE REASON",
+                        "Search this station's reasons • blank shows all • selections stay saved",
+                        previous.get("filter", ""),
+                        return_modal=previous,
+                    )
                 elif action == "done":
                     self.save_failure_selection()
                 elif action == "remove":
                     self.remove_failure_station()
-            return
-        if self.busy:
+                elif action in {"report", "self_fix"}:
+                    self.report_from_failure_picker(self_fix=action == "self_fix")
             return
         self.logger.log(
             "touch_action", control=key, machine_status=self.state.get("status")
@@ -787,23 +1024,54 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
             machine_status=self.state.get("status"),
         )
 
-    def perform(self, working, function, on_success=None, *, quiet=False):
+    def perform(
+        self,
+        working,
+        function,
+        on_success=None,
+        *,
+        quiet=False,
+        before_transaction=None,
+        on_error=None,
+        transactional=True,
+    ):
         """Run one operation off the UI thread.
 
         ``quiet`` marks automatic background work: it shows no progress message
         and reports a failure as a short notice instead of a dialog, because no
         operator is waiting on it.
         """
-        if self.busy:
+        if self.busy or (transactional and self.version_trial_active()):
             return False
         self.busy = True
+        self.busy_message = working or "Saving local updates"
+        self.busy_started = time.monotonic()
+        if hasattr(getattr(self, "canvas", None), "configure"):
+            self.canvas.configure(cursor="watch")
+        self.request_render()
         if not quiet:
             self.notify(working, "info", 15)
         self.logger.log("operation_started", operation=working)
 
         def worker():
             try:
-                result = function()
+                if before_transaction:
+                    before_transaction()
+                queued_before = len(self.state.get("delivery_outbox", []))
+                transaction = (
+                    self.state_store.transaction()
+                    if transactional
+                    and getattr(self.provider, "deferred_writes", False)
+                    else nullcontext()
+                )
+                with transaction:
+                    result = function()
+                if (
+                    not quiet
+                    and on_success is None
+                    and len(self.state.get("delivery_outbox", [])) > queued_before
+                ):
+                    result = "Action saved on this terminal • external updates queued"
                 self.logger.log("operation_completed", operation=working, result=result)
                 self.events.put((True, result, on_success, working, quiet))
             except Exception as exc:
@@ -814,9 +1082,14 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
                     error=str(exc),
                     error_type=exc.__class__.__name__,
                 )
-                self.events.put((False, exc, None, working, quiet))
+                # Recovery coordinators must see failures of the OUTERMOST
+                # commit too, not only exceptions raised inside function().
+                self.events.put((False, exc, on_error, working, quiet))
 
-        threading.Thread(target=worker, daemon=True).start()
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except Exception as exc:  # restore UI ownership on thread exhaustion
+            self.events.put((False, exc, on_error, working, quiet))
         return True
 
     def poll_events(self):
@@ -827,7 +1100,11 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
         if item is not None:
             ok, result, callback = item[:3]
             working, quiet = (item[3], item[4]) if len(item) >= 5 else ("", False)
-            self.busy = False
+            if len(item) >= 5:
+                self.busy = False
+                self.busy_message = ""
+                if hasattr(getattr(self, "canvas", None), "configure"):
+                    self.canvas.configure(cursor="")
             try:
                 if ok and callback:
                     self.ui_context = working or "Screen update"
@@ -835,22 +1112,40 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
                 elif ok:
                     if result or not quiet:
                         self.notify(str(result), "success", 5)
-                elif quiet:
-                    self.notify(str(result), "error", 8)
                 else:
-                    self.show_error_panel(working or "Operation", result)
+                    if callback:
+                        callback(result)
+                    if quiet:
+                        self.notify(str(result), "error", 8)
+                    else:
+                        self.show_error_panel(working or "Operation", result)
             except Exception as exc:
                 self.report_ui_error(working or "Screen update", exc)
             finally:
                 self.ui_context = ""
+                self.request_render()
         try:
+            service = getattr(self, "update_service", None)
+            if service and not self.render_blocked and not self.error_panel:
+                service.note_ui_heartbeat()
             self.check_api_limit_warning()
+            if getattr(self, "history", None):
+                self.history.poll()
+            if getattr(self, "delivery", None) and not getattr(self, "_closing", False):
+                try:
+                    self.delivery.poll()
+                except StateSaveError as exc:
+                    # A held acknowledgement is retried after storage recovers.
+                    self.notify(str(exc), "error", 8)
         finally:
             self.root.after(100, self.poll_events)
 
     def save_state(self):
         try:
-            self.state_store.save()
+            if self.state_store.save() is False:
+                # The enclosing transaction will commit once, after every intent
+                # is present. Do not log intermediate states as durable saves.
+                return
         except StateSaveError as exc:
             self.logger.log(
                 "state_save_failed",
@@ -879,19 +1174,48 @@ class FloorTerminalApp(WorkflowMixin, DialogMixin, SoftwareUpdateMixin, Operator
     # only change what the panel reports.
     # ------------------------------------------------------------------
 
-    def open_settings(self, directory=None):
-        return SettingsWindow(
-            self, directory or {"teams": [], "conversations": []}
+    def open_settings(self, directory=None, *, deferred=False):
+        current = getattr(self, "settings_window", None)
+        if current is not None and current.win.winfo_exists():
+            current.win.deiconify()
+            current.win.lift()
+            return current
+        self.settings_window = SettingsWindow(
+            self, directory or {"teams": [], "conversations": []}, deferred=deferred
         )
+        return self.settings_window
 
 
 def main():
+    import sys
+
+    from .core.paths import RUNTIME_ROOT
+    from .update.compatibility import (
+        CHECK_ARGUMENT,
+        CompatibilityError,
+        cli,
+        probation_startup_check,
+    )
+
+    if sys.argv[1:] == [CHECK_ARGUMENT]:
+        raise SystemExit(cli(RUNTIME_ROOT))
+    try:
+        probation = probation_startup_check(RUNTIME_ROOT)
+    except (CompatibilityError, OSError):
+        print(
+            "New version could not safely read runtime data; supervised recovery requested"
+        )
+        raise SystemExit(78) from None
     root = tk.Tk()
     project_profile = None
     try:
         project_profile = load_project_profile()
         FloorTerminalApp(root, project_profile)
     except (ProjectProfileError, ConfigurationError, StateIntegrityError) as exc:
+        if probation:
+            root.destroy()
+            print("New version could not initialize; supervised recovery requested")
+            raise SystemExit(78) from None
         print(f"Configuration error: {exc}")
         root.title(
             f"{project_profile.product_short_name if project_profile else 'Application'} • Configuration Required"

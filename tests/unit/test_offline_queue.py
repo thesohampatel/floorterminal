@@ -49,6 +49,7 @@ class OfflineQueueTests(unittest.TestCase):
         app.provider = provider
         app.config = {
             "line_name": "Test Line",
+            "zones": ["Station 1"],
             "engineering_team_name": "",
             "response_record_priority": "HIGH",
             "asset_status_tracking": False,
@@ -241,6 +242,7 @@ class PlannedWorkOfflineQueueTests(unittest.TestCase):
         app.provider = provider
         app.config = {
             "line_name": "Test Line",
+            "zones": ["Station 1"],
             "planned_work_priority": "MEDIUM",
             "asset_status_tracking": False,
             "planned_work_title_template": "PLANNED {work_label} {line} {zones} {time}",

@@ -7,8 +7,8 @@ from the developer.
 Updating is **entirely offline and entirely manual**. You download a release on any
 office computer, put it on an ordinary USB drive, plug the drive into the terminal,
 and confirm the change on the touchscreen. The terminal checks the update by itself
-before it will install anything, and it can put the previous version back at any
-time with one touch.
+before it will install anything. It can restore a retained previous version when
+that version can safely use the terminal's current data.
 
 ![Walkthrough of an offline update](images/update-walkthrough.gif)
 
@@ -27,10 +27,15 @@ button. It is the only thing this feature adds to the everyday screen.
 | **Amber arrow** | Something is waiting for you: an update drive is ready to install, a newer version has been published, the last check is old, or a recently installed version is still on trial. | Touch the button and read the panel. |
 | **Red mark** | The terminal could not find out whether an update exists, or it recovered itself from a failed update. | Touch the button. Usually the terminal simply has no internet access, which is normal in a factory. |
 
-**The colour never affects production.** Reporting a problem, timers, responder
+**Availability colours do not affect production.** Reporting a problem, timers, responder
 selection, restoration, Settings, sounds, and the connector all behave exactly the
 same whether the indicator is green, amber, or red. If the whole update feature
 failed to start, the console still runs normally.
+
+Installation is a maintenance operation. The v1.2.0 updater requires
+an idle, synchronized terminal. Allow its two-minute health check after restart
+before reporting/Settings writes resume. These new safeguards are not retroactively
+present in already-published older binaries.
 
 ---
 
@@ -71,6 +76,10 @@ with the name of the person who authorized it.
 ---
 
 ## Updating the terminal
+
+Schedule a maintenance window. Finish every active response and wait for saved
+updates to synchronize. Do not delete pending reports just to enable an update.
+Keep a secure site backup before the first upgrade from an older published version.
 
 ### Step 1 — Download the release (on any computer)
 
@@ -160,26 +169,27 @@ Open the Software Update panel and touch **INSTALL VERSION x.y.z**.
 ![The panel with a verified update ready to install](images/update-panel-ready.png)
 
 The terminal asks for the administrator name and then the Settings password — the
-same authorization used for Settings and for closing the kiosk. Both are recorded in
-the update log.
+same authorization used for Settings and for closing the kiosk. The administrator
+identity and authorized action are recorded in the update log, **not the password**.
 
 ![Administrator authorization before a version change](images/update-panel-authorization.png)
 
-If the line is not running normally at that moment, the prompt says so. The terminal
-will still restart and resume the same event, but you should normally update while
-the line is running.
+In the v1.2.0 updater, an active response, parked group incident or
+unfinished synchronization blocks the change. Finish and synchronize that work,
+then retry during a maintenance window. Do not discard the event to bypass this
+check. Already-published older updaters did not enforce this restriction.
 
 ### Step 5 — The terminal restarts itself
 
 The terminal switches to the new version and restarts. Startup takes the same time
 as a normal restart.
 
-**Nothing of yours is touched.** Your line name, stations, failure lists, messages,
-colours, sounds, log settings, the connector file, the saved workflow state, and the
-activity logs all stay exactly where they were. An update replaces the program and
-nothing else — so if a problem was open when you updated, the terminal comes back
-with the same problem still open, the same timer still running, and the same
-responders still selected.
+**Your data is preserved, not replaced with a template.** Compatible connector
+files keep their credentials, endpoints and mappings unchanged. The new updater
+checks configuration/state and keeps a private local checkpoint. It can recover
+missing configuration extensions dropped by an older Settings writer without
+overwriting newer edits. It never restores an old operational queue or rotates
+credentials for you. Finish the health check before normal reporting.
 
 Remove the USB drive once the new version is running. Keep it: the drive now also
 contains a record of what it did, and it can update the next terminal.
@@ -193,8 +203,10 @@ If the new version does not suit the site, open the Software Update panel and to
 restarts.
 
 The previous version is kept on the terminal, so this needs no drive, no network,
-and no download. Your configuration and data are not affected by going back, exactly
-as they are not affected by going forward.
+and no download. The console first checks the older reader's compatibility. If it
+cannot preserve groups, connector semantics or saved fields, **Restore is refused
+and the current version stays running**. It does not erase data to force a downgrade.
+See [configuration and connector compatibility](update-data-compatibility.md).
 
 ---
 
@@ -226,7 +238,7 @@ The most common reason is simply that the terminal has no internet access, which
 normal and often deliberate on a factory network. It means the terminal cannot tell
 you whether a newer version exists. It does not mean anything is wrong.
 
-You can still update at any time using a USB drive, and you can always see what has
+You can still update using a USB drive during a suitable maintenance window, and see what has
 been published by opening the releases page yourself on any other computer.
 
 If your site never allows the terminal to reach the internet, an administrator can
@@ -252,8 +264,10 @@ No. The drive is read as data only. The program on it is checked, copied into th
 terminal's own storage, and only run after a person authorizes the change.
 
 **Will I lose my line configuration?**
-No. Configuration, connector, saved state, and logs are never read, moved, or
-rewritten by an update.
+Compatible connectors remain unchanged; configuration extensions are retained and
+runtime files are checkpointed privately. Unsafe changes are refused. No older
+state snapshot is automatically restored. See [data preservation rules](update-data-compatibility.md)
+for supported merges and limits; arbitrary future/older versions are not guaranteed.
 
 **Can I update several terminals with one drive?**
 Yes. Repeat steps 3 to 5 at each terminal. The drive collects a record from each one.
@@ -348,7 +362,8 @@ payloads are rechecked before restoration. The initial installer-provisioned slo
 belongs to the trusted local OS/install boundary; USB signatures cannot retroactively
 authenticate an installation that was not provisioned from signed media.
 
-Configuration and workflow data are not rolled back. Check release compatibility
+Operational state is never restored from an old checkpoint. Compatibility checks
+cannot invent functionality absent from an older executable. Check release compatibility
 and site backup procedures before moving between major versions. If no safe retained
 target exists, use an authorized reinstall with a verified installation bundle;
 never bypass signature checks or edit version metadata.

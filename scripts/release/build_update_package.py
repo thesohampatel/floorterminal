@@ -51,14 +51,14 @@ Signed with key id      : {key_id}
 
 HOW TO USE THIS DRIVE
 1. Keep this directory exactly as it is. Do not rename, edit, or add files.
-2. Plug the drive into the Raspberry Pi terminal while the line is running.
+2. Finish active responses and saved synchronization, then plug in the drive.
 3. The terminal verifies the signature and checksum by itself and turns its
    update indicator amber.
 4. Touch the update indicator beside the information button, then touch
    INSTALL UPDATE and enter the administrator name and Settings password.
-5. The terminal restarts into the new version and continues from the exact
-   state it was in. Configuration, connector files, logs, and any active
-   downtime event are never touched by an update.
+5. Compatible connector files stay in place. Newer software checks runtime data
+   and keeps private checkpoints; it refuses unsafe version changes. Allow the
+   two-minute health check to finish before normal reporting resumes.
 6. If the new version does not suit the site, touch the update indicator again
    and use RESTORE PREVIOUS VERSION.
 

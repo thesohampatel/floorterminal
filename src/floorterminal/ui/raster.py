@@ -148,12 +148,15 @@ def rounded_rectangle_png(width, height, radius, fill, outline, line_width, back
 class RasterCache:
     """Bounded cache of rendered shapes, keyed by exact pixels and colours."""
 
-    def __init__(self, factory, limit=600):
+    def __init__(self, factory, limit=256, byte_limit=24 * 1024 * 1024):
         self.factory = factory
         self.limit = limit
         self.images = OrderedDict()
+        self.byte_limit = byte_limit
+        self.bytes_used = 0
+        self.costs = {}
 
-    def get(self, key, render):
+    def get(self, key, render, *, cost=0):
         image = self.images.get(key)
         if image is not None:
             self.images.move_to_end(key)
@@ -162,10 +165,20 @@ class RasterCache:
         if data is None:
             return None
         image = self.factory(data)
+        # Visible canvas items retain their own reference even when too large
+        # to cache. Compressed PNG size is not its decoded Tk memory footprint.
+        cost = max(0, cost)
+        if cost > self.byte_limit:
+            return image
         self.images[key] = image
-        while len(self.images) > self.limit:
-            self.images.popitem(last=False)
+        self.costs[key] = cost
+        self.bytes_used += cost
+        while len(self.images) > self.limit or self.bytes_used > self.byte_limit:
+            evicted, _ = self.images.popitem(last=False)
+            self.bytes_used -= self.costs.pop(evicted)
         return image
 
     def clear(self):
         self.images.clear()
+        self.costs.clear()
+        self.bytes_used = 0

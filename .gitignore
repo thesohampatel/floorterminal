@@ -5,6 +5,11 @@ project_profile.json
 auth_throttle.json
 response_state.json
 logs/
+records/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
 .active_connector
 .env
 .env.*

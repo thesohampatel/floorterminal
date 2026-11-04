@@ -10,7 +10,9 @@ import tempfile
 from pathlib import Path
 
 from ..i18n import available_languages
+from .json_file import read_bounded_json
 from .paths import RUNTIME_ROOT
+from .rate_policy import positive_request_budget
 
 PROJECT_DIR = RUNTIME_ROOT
 CONFIG_FILE = PROJECT_DIR / "config.json"
@@ -48,6 +50,7 @@ class ConfigurationError(ValueError):
 
 
 DEFAULT_CONFIG = {
+    "reporting_mode": "connected",
     "line_name": "Line 1",
     "location_id": "",
     "asset_id": "",
@@ -61,12 +64,14 @@ DEFAULT_CONFIG = {
         zone: list(STATION_FAILURE_FALLBACK) for zone in DEFAULT_ZONES
     },
     "zones": list(DEFAULT_ZONES),
+    "station_groups": [],
     "response_record_priority": "HIGH",
     "response_record_type": "REACTIVE",
     "planned_work_priority": "MEDIUM",
     "asset_status_tracking": False,
     "fullscreen_on_linux": True,
-    "animation_interval_ms": 80,
+    "animation_interval_ms": 33,
+    "api_requests_per_minute": None,
     "sound_enabled": True,
     "sound_volume": 70,
     "sound_cooldown_ms": 750,
@@ -101,10 +106,12 @@ DEFAULT_CONFIG = {
 }
 
 CONFIG_KEYS = (
+    "reporting_mode",
     "line_name",
     "location_id",
     "asset_id",
     "zones",
+    "station_groups",
     "engineering_team_name",
     "engineering_chat_name",
     "quality_chat_name",
@@ -118,6 +125,7 @@ CONFIG_KEYS = (
     "asset_status_tracking",
     "fullscreen_on_linux",
     "animation_interval_ms",
+    "api_requests_per_minute",
     "sound_enabled",
     "sound_volume",
     "sound_cooldown_ms",
@@ -128,10 +136,6 @@ CONFIG_KEYS = (
     "ui_language",
     "ui_color_preset",
     "log_directory",
-    "log_level",
-    "log_retention_days",
-    "log_storage_reserve_mb",
-    "log_daily_growth_floor_mb",
     "downtime_title_template",
     "downtime_description_template",
     "help_message_template",
@@ -193,19 +197,60 @@ def write_json(path: Path, value):
 
 
 def load_config():
-    if not CONFIG_FILE.exists():
+    if not CONFIG_FILE.exists() and not CONFIG_FILE.is_symlink():
         write_config(DEFAULT_CONFIG)
-    restrict_file(CONFIG_FILE)
     try:
-        loaded = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        loaded = read_bounded_json(CONFIG_FILE, max_bytes=4 * 1024 * 1024, private=True)
     except OSError as exc:
         raise ConfigurationError(f"Cannot read {CONFIG_FILE.name}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise ConfigurationError(
             f"Invalid JSON in {CONFIG_FILE.name} at line {exc.lineno}, column {exc.colno}."
         ) from exc
+    except (ValueError, UnicodeError) as exc:
+        raise ConfigurationError(f"Cannot trust {CONFIG_FILE.name}: {exc}") from exc
     if not isinstance(loaded, dict):
         raise ConfigurationError(f"{CONFIG_FILE.name} must contain one JSON object.")
+    from ..update.compatibility import restore_config_extensions
+
+    try:
+        merged, carry = restore_config_extensions(CONFIG_FILE.parent, loaded)
+    except (ValueError, OSError) as exc:
+        raise ConfigurationError(
+            "Configuration compatibility recovery needs administrator review"
+        ) from exc
+    result = prepare_config(merged)
+    if carry is not None:
+        # One-file, validated migration. Never restore a stale config over
+        # changes made while the older version was running.
+        try:
+            write_json(CONFIG_FILE, merged)
+            carry.unlink()
+        except OSError as exc:
+            raise ConfigurationError(
+                "Configuration compatibility recovery could not be saved"
+            ) from exc
+    return result
+
+
+def prepare_config(loaded):
+    """Build a version-compatible runtime view without rewriting the source.
+
+    Defaults and renamed settings are applied in memory. Unknown extension data
+    survives both loading and subsequent Settings saves; it is never interpreted
+    as an executable instruction or a replacement for a known setting.
+    """
+    from copy import deepcopy
+
+    if not isinstance(loaded, dict):
+        raise ConfigurationError(f"{CONFIG_FILE.name} must contain one JSON object.")
+    loaded = deepcopy(loaded)
+    if "schema_version" in loaded and (
+        type(loaded["schema_version"]) is not int or loaded["schema_version"] != 1
+    ):
+        raise ConfigurationError(
+            "Unsupported configuration schema; preserve this file and use a compatible application"
+        )
     # Pre-release compatibility for installations created before the setting was
     # accurately named. The old value is consumed once and never written again.
     if "directory_max_pages" not in loaded and "engineering_member_max_pages" in loaded:
@@ -228,7 +273,11 @@ def load_config():
 
 
 def validate_station_failures(config):
-    """Require one independent four-choice list for every configured station."""
+    """Require a user-owned custom list per station; Others is always implicit.
+
+    There is no reason-count limit. The existing bounded configuration file and
+    recovery journal remain the resource boundaries, independent of UI capacity.
+    """
     zones = config.get("zones")
     if not isinstance(zones, list) or not zones:
         raise ConfigurationError("'zones' must be a non-empty list of station names.")
@@ -254,14 +303,19 @@ def validate_station_failures(config):
         if name not in failures:
             continue
         values = failures[name]
-        if not isinstance(values, list) or not 1 <= len(values) <= 4:
+        if not isinstance(values, list):
             problems.append(
-                f"{name} must contain between one and four custom failure names"
+                f"{name} failure names must be a list; [] means Others only"
             )
             continue
-        labels = [str(value).strip() for value in values]
+        if any(not isinstance(value, str) for value in values):
+            problems.append(f"{name} failure names must be text")
+            continue
+        labels = [value.strip() for value in values]
         if any(not label for label in labels):
             problems.append(f"{name} contains an empty failure name")
+        if any(not label.isprintable() for label in labels):
+            problems.append(f"{name} failure names must be printable single-line text")
         if any(label.casefold() in ("other", "others") for label in labels):
             problems.append(
                 f"{name} must not include Others; it is added automatically"
@@ -309,6 +363,14 @@ def validate_directory_names(config):
 def validate_config(config):
     """Validate every operator-editable production setting."""
     validate_station_failures(config)
+    if config.get("reporting_mode", "connected") not in {"connected", "local"}:
+        raise ConfigurationError("reporting_mode must be connected or local")
+    from .topology import validate_groups
+
+    try:
+        validate_groups(config)
+    except (ValueError, TypeError) as exc:
+        raise ConfigurationError(str(exc)) from exc
     if not str(config.get("line_name", "")).strip():
         raise ConfigurationError("Line / machine name cannot be empty.")
     if str(config.get("response_record_priority", "")).upper() not in (
@@ -335,19 +397,22 @@ def validate_config(config):
         raise ConfigurationError("asset_status_tracking must be true or false.")
     if (
         config.get("asset_status_tracking")
+        and not config.get("station_groups")
         and not str(config.get("asset_id", "")).strip()
     ):
         raise ConfigurationError(
             "Asset ID is required when asset status tracking is enabled."
         )
+    if config.get("api_requests_per_minute") is not None:
+        try:
+            positive_request_budget(config["api_requests_per_minute"])
+        except ValueError as exc:
+            raise ConfigurationError(str(exc)) from exc
     ranges = {
         "animation_interval_ms": (30, 1000),
         "sound_volume": (0, 100),
         "sound_cooldown_ms": (0, 5000),
         "directory_max_pages": (1, 20),
-        "log_retention_days": (1, 730),
-        "log_storage_reserve_mb": (128, 102400),
-        "log_daily_growth_floor_mb": (1, 1024),
         "micro_stop_threshold_minutes": (1, 1440),
     }
     for key, (minimum, maximum) in ranges.items():
@@ -386,14 +451,6 @@ def validate_config(config):
         raise ConfigurationError("sound_enabled must be true or false.")
     if not isinstance(config.get("software_update_check_enabled"), bool):
         raise ConfigurationError("software_update_check_enabled must be true or false.")
-    if str(config.get("log_level", "")).upper() not in (
-        "DEBUG",
-        "INFO",
-        "WARNING",
-        "ERROR",
-        "CRITICAL",
-    ):
-        raise ConfigurationError("log_level is invalid.")
     if not str(config.get("log_directory", "")).strip():
         raise ConfigurationError("log_directory cannot be empty.")
     allowed = {
@@ -436,4 +493,21 @@ def validate_config(config):
 
 
 def write_config(config):
-    write_json(CONFIG_FILE, {key: config[key] for key in CONFIG_KEYS if key in config})
+    # Settings edits only own CONFIG_KEYS. Retain extensions from a newer reader
+    # (and unknown nested colour entries) rather than silently dropping them.
+    values = {}
+    if CONFIG_FILE.exists() or CONFIG_FILE.is_symlink():
+        saved = read_bounded_json(CONFIG_FILE, max_bytes=4 * 1024 * 1024)
+        if not isinstance(saved, dict):
+            raise ConfigurationError("Existing configuration must be a JSON object")
+        values.update(
+            {key: value for key, value in saved.items() if key not in CONFIG_KEYS}
+        )
+    values.update({key: config[key] for key in CONFIG_KEYS if key in config})
+    if (
+        len(json.dumps(values, indent=2, ensure_ascii=False, allow_nan=False).encode())
+        + 1
+        > 4 * 1024 * 1024
+    ):
+        raise ConfigurationError("Configuration exceeds the 4 MiB safety limit")
+    write_json(CONFIG_FILE, values)

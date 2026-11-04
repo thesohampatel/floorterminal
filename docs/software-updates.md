@@ -25,7 +25,9 @@ anything that arrived on removable media.
 - No partial, differential, or streaming updates.
 - No update of the operating system, firmware, or any package outside the
   application's own version slot.
-- No change to deployment-owned data of any kind.
+- No replacement of deployment-owned connectors or operational state with release
+  defaults. Validated configuration-extension recovery is permitted; see
+  [data compatibility](update-data-compatibility.md).
 
 ### Independence from production
 
@@ -36,6 +38,11 @@ whether the subsystem started at all. Construction failure is caught and logged 
 `update_subsystem_unavailable`; the panel then reports an unavailable status and the
 console runs normally.
 
+An authorized activation is a maintenance operation, not background discovery.
+In v1.2.0, finish responses and synchronize saved work first. Reporting and Settings
+writes wait during the new version's two-minute health check; this preserves the
+previous reader's data if supervised recovery is needed.
+
 ## 2. Trust model
 
 | Property | Mechanism |
@@ -44,8 +51,8 @@ console runs normally.
 | The payload is exactly what was signed | SHA-256 of the executable is carried in the signed manifest and verified on the medium, again while copying, and again from the terminal's own disk |
 | The update source cannot be redirected | The endpoint, host, product identity, accepted volume labels, and trusted keys are source constants; no configuration, environment variable, or file can change them |
 | Removable media cannot execute code | Nothing on the medium is ever executed, sourced, or evaluated; it is read as size-bounded data through paths that refuse symbolic links |
-| A person is accountable for every change | Administrator identity plus the PBKDF2 Settings password, recorded in the update log and the activity log |
-| A bad version cannot strand a terminal | Version slots, an atomic link switch, a supervised boot counter, automatic rollback, and one-touch manual rollback |
+| A person is accountable for every change | Administrator identity and Settings-password verification; identity and action, never the password, are recorded in the update and activity logs |
+| Recovery from a failed version is supported | Retained version slots, an atomic link switch, a supervised boot counter, startup-failure rollback, and authorized manual rollback subject to data compatibility |
 | Evidence survives the change | Append-only update log on the terminal and a mirrored copy on the medium |
 
 ### What is out of scope
@@ -87,9 +94,9 @@ An installation made by the current `install.sh` is *managed*:
 │   ├── update-log.jsonl           append-only operator- and auditor-visible log
 │   ├── channel_cache.json         last availability answer
 │   └── staging/<version>/         verified candidate awaiting authorization
-├── config.json  connector.json    deployment owned — never touched by an update
-├── response_state.json            deployment owned — never touched by an update
-└── logs/YYYY/MM/DD/activity.jsonl deployment owned — never touched by an update
+├── config.json  connector.json    deployment owned — not replaced by release defaults
+├── response_state.json            deployment owned — never restored from an old snapshot
+└── logs/YYYY/MM/DD/activity.jsonl deployment owned — retained audit history
 ```
 
 Switching versions replaces exactly one symbolic link. `rename(2)` is atomic on
@@ -111,6 +118,11 @@ An installation whose `floorterminal` is a regular file rather than a
 symbolic link is *unmanaged*. It reports status normally and offers no in-place
 version change; re-running the current `install.sh` migrates it, preserving the
 previous executable under `update/replaced-executable-<timestamp>` as evidence.
+
+`update/data-checkpoints/` holds up to three private runtime snapshots.
+`update/config-carry.json` can preserve extensions a legacy Settings writer cannot
+retain. These may contain sensitive data and must not be copied to USB/public
+release artifacts. See [data compatibility](update-data-compatibility.md).
 
 ## 4. Update package format
 
@@ -282,9 +294,10 @@ version and binds installation to its exact executable digest. If background
 discovery changes the candidate while the prompt is open, the action is refused
 and the administrator must review and authorize the new selection.
 
-If the line is not `RUNNING`, the password prompt states the current status and that
-the terminal will restart and resume the event. Both the request and the outcome are
-audited with the machine status at the time.
+If any group has an active response, saved delivery/history work remains, or a
+background worker is in flight, a version change is refused with an explanation.
+The condition is checked again after authorization. Both request and outcome are
+audited; runtime state is saved before installation, never after the link switch.
 
 An action is refused while another operation is in flight, when nothing is staged,
 when no rollback target exists, or when the installation is unmanaged.
@@ -302,10 +315,14 @@ Activation order is deliberate:
 
 1. Verify the retained signature, version, complete executable size and checksum
    again. A retained target executable must also match that authenticated payload.
-   Promote the complete staging directory, including signed evidence, into
+   Validate runtime files and create a private checkpoint. A different target at
+   or above 1.2.0 must validate the detached copy through its headless protocol;
+   known 1.0/1.1 readers use reviewed legacy constraints. Then promote the complete
+   staging directory, including signed evidence, into
    `versions/<version>/` with an atomic same-filesystem rename, then `fsync` the
    slot and versions directory. No active link or journal intent changes on a
-   verification failure.
+   verification failure. Recheck the live data fingerprint before recording intent.
+   Hashing, checkpointing and validation run off the Tk event loop.
 2. Write `journal.json` and `boot_state` recording the intent — **before** the
    switch.
 3. Replace the active link atomically and `fsync` the deployment root.
@@ -329,8 +346,11 @@ on file content: each field is read with a plain `read` loop and validated again
 strict character class, so a damaged or hostile state file degrades to "start
 normally". Every failure path still reaches the application.
 
-A healthy version marks itself `confirmed` after 120 s of uninterrupted running,
-which also prunes superseded slots down to three, never removing the active version
+A healthy version marks itself `confirmed` after 120 s of uninterrupted running
+and a recent healthy GUI heartbeat. Reporting/Settings mutations wait during this
+maintenance dwell. A supervised startup that cannot read runtime data requests
+watchdog recovery instead of remaining on an error page. Confirmation
+also prunes superseded slots down to three, never removing the active version
 or the rollback target. Another upgrade is blocked during probation and while a
 version switch still needs a restart. Only the process actually running the active
 version may confirm its health; an older process cannot confirm a newly selected slot.
@@ -345,11 +365,16 @@ version may confirm its health; an older process cannot confirm a newly selected
 | Power loss during the link switch | `rename(2)` is atomic: either the old or the new link, never a partial one |
 | Power loss immediately after the switch | New version starts on probation; if it cannot start, the watchdog restores the previous one |
 | New version crashes on start | Restored automatically after three supervised attempts; red indicator explains why |
-| New version starts but is unwanted | One-touch **RESTORE VERSION**, administrator authorized |
+| New version starts but is unwanted | **RESTORE VERSION**, administrator authorized, after the idle-state and compatibility checks pass |
 | `journal.json` corrupted | Treated as unknown; the active link is left exactly as it is and the terminal starts |
 | `boot_state` corrupted or missing | Launcher validates every field, ignores what it cannot parse, and starts the active version |
 | Update directory missing or read-only | Status reports unavailable; the console runs normally |
 | Filesystem full | Staging refused with the required and available space; nothing changed |
+| Connector/configuration/state incompatible | Change refused; running version and files preserved |
+| Future candidate probe fails or exceeds 30 seconds | No activation or connector replacement |
+| Runtime files changed during verification | Fingerprint mismatch; review and retry |
+| Extension keys lost during a legacy Settings save | Missing keys merge back on return; current values win |
+| Older version lacks a feature or saved-state field | Refused, not coerced into a lossy downgrade |
 | Network blocked or absent | Red indicator; every other function unaffected; USB updates still work |
 | Signing key retired or lost | Installed software keeps running and rollback keeps working; no new packages can be published until a replacement key is rolled out |
 | Update drive tampered with | Rejected before anything is copied; the reason is shown and logged both places |
@@ -419,6 +444,7 @@ tests/unit/test_update_launcher.py      the shell watchdog, run as a real proces
 tests/unit/test_update_deployment.py    immutable policy, installer, service, pipeline
 tests/unit/test_update_installer_script.py  the real install.sh, run in a sandbox
 tests/unit/test_update_application.py   panel drawing, controls, and authorization
+tests/unit/test_update_compatibility.py preservation, round trips, candidate probes
 ```
 
 None of them opens a socket. Run the whole suite with:
