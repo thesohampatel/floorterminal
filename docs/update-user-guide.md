@@ -1,6 +1,6 @@
 # Updating the terminal — step-by-step guide
 
-This guide is for the person who looks after an FloorTerminal kiosk on the
+This guide is for the person who looks after a FloorTerminal kiosk on the
 factory floor. It needs no command line, no network on the terminal, and no help
 from the developer.
 
@@ -9,6 +9,16 @@ office computer, put it on an ordinary USB drive, plug the drive into the termin
 and confirm the change on the touchscreen. The terminal checks the update by itself
 before it will install anything. It can restore a retained previous version when
 that version can safely use the terminal's current data.
+
+**Exception for an existing v1.2.0 installation:** the corrected v1.2.0 distribution
+has the same version number, so this normal USB flow will not offer it as a newer
+version. Use the [administrator-only reinstall guide](releases/v1.2.0-reissue.md).
+Its maintenance backup and checksum checks are required; do not delete runtime
+data to bypass the version guard.
+
+The walkthrough uses v1.2.0 screenshots with illustrative next-version states.
+Only [published releases](https://github.com/thesohampatel/floorterminal/releases)
+identify software that is actually available to download.
 
 ![Walkthrough of an offline update](images/v1.2.0/update-walkthrough.gif)
 

@@ -147,6 +147,11 @@ Compatibility and verification results are documented in
 [version 1.1.0 release notes](docs/releases/v1.1.0.md) and
 [version 1.0.0 release notes](docs/releases/v1.0.0.md).
 
+**Why does GitHub show an older version beside some folders?** That is the last
+commit that changed those files, not the application's current version. Unchanged
+installer and service files are included in v1.2.0 too. See
+[repository files and release versions](docs/building.md#repository-files-and-release-versions).
+
 ## Software updates
 
 A small indicator beside the information button reports whether the terminal runs

@@ -96,8 +96,14 @@ An installation made by the current `install.sh` is *managed*:
 │   └── staging/<version>/         verified candidate awaiting authorization
 ├── config.json  connector.json    deployment owned — not replaced by release defaults
 ├── response_state.json            deployment owned — never restored from an old snapshot
+├── records/incidents.sqlite3      deployment owned — versioned local incident archive
 └── logs/YYYY/MM/DD/activity.jsonl deployment owned — retained audit history
 ```
+
+The version-slot names above illustrate a retained previous release and the active
+release; they are not hardcoded installer targets. A slot initially installed by
+`install.sh` contains the executable, license, notices, SBOM and `VERSION` file.
+A slot activated by the signed USB updater also has `release.json` metadata.
 
 Switching versions replaces exactly one symbolic link. `rename(2)` is atomic on
 POSIX, so at every instant the link resolves to a complete executable.
@@ -144,6 +150,10 @@ and exFAT cannot store a longer one. The `update-log/` directory is created on t
 medium by the terminal.
 
 ### `update_manifest.json`
+
+This is an illustrative schema example, not the current package's exact timestamp,
+size or digest. Use the signed manifest supplied with the downloaded release;
+never edit a signed package to match an example.
 
 ```json
 {
