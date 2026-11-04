@@ -1,6 +1,65 @@
 # Release verification
 
-## 1.2.0 — release-candidate verification
+## 1.2.0 — corrected distribution verification
+
+The owner approved a same-version reissue on **3 November 2026** to correct stale
+compiled release text and refresh the documentation gallery. See the
+[reissue notice and executable identifiers](releases/v1.2.0-reissue.md) before
+reinstalling an existing 1.2.0 terminal. The version stays 1.2.0; this is not a
+normal version-increasing USB update.
+
+- **734 offline tests pass with zero skips** on the physical Pi 5 graphical
+  session (64-bit Raspberry Pi OS, Python 3.13.5 / Tk 8.6). Five new release-catalogue
+  checks reject preview wording, invalid dates, mismatched release notes and invalid
+  capability lists. Two new installer regressions exercise same-version replacement:
+  configuration, multiple connectors, password, state, history and journal bytes
+  survive; corrupt replacement checksums leave the executable unchanged.
+- The installer regressions run the real installer with unprivileged command
+  shims in disposable directories. They do not modify the site's `/opt` installation
+  or establish that every deployment-specific launcher will stop correctly.
+- The rebuilt ARM64 bundle contains exactly **14 runtime files** and passes the
+  source-input, neutral-template and content audits. Build ID:
+  `407f8f66-ca48-4976-913f-9ba610e9162f`. The source-input digest is
+  `62f4d99f4439b65f1ecb2be685d30f5abc940aa2d20216fd64a036bdaefef5b1`.
+- The signing key stays on the maintainer's workstation outside the repository.
+  The install archive, signed USB archive, both checksum sidecars and signed channel
+  are checked together against the pinned public key and reviewed source inputs.
+- The **rebuilt executable** passes native 1920×1200 fullscreen animation,
+  Information, protected Settings and the corrected Version panel. Actual input
+  completes two standalone incident cycles. An abrupt process restart restores the
+  same self-fix incident and start time; Engineering handover keeps that identity.
+  No callback, rendering, saving or application errors are recorded.
+- Authenticated activation and rollback/return pass with this real compiled
+  candidate. Connector bytes remain unchanged and newer edits survive restoration.
+  The old slot is a controlled fixture, not a complete historical release binary;
+  this is not a physical power-loss or all-version compatibility certification.
+- The gallery is regenerated from the corrected source, including its Version
+  panel. The [manifest](images/v1.2.0/manifest.json) binds all **102 assets** to that
+  source digest. Capture drivers check groups, self-fix, touch paths, flexible
+  failure reasons, saved teams, delivery, Settings and adaptive layouts. Animation
+  clips illustrate the real renderer with fixed time steps, not a measured fps claim.
+- The macOS development desktop constrains oversized test windows to its available
+  1440×777 workspace. Two geometry tests failed there because their requested large
+  or tall windows were clamped; the complete geometry suite passed on the Pi.
+  Those desktop results are not counted as a successful full macOS GUI run.
+- No real integration API is called. The installed kiosk, its configuration and
+  its service/autostart are not replaced. Site acceptance and long-duration limits
+  described below remain applicable; passing tests are not a defect-free guarantee.
+
+## Original v1.2.0 distribution — historical evidence
+
+**Published 3 November 2026:** [v1.2.0 downloads](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.0)
+and [merged release PR #16](https://github.com/thesohampatel/floorterminal/pull/16).
+The original release tag initially pointed to `a077a34aadf6107800be952061be1fce3c69386c`;
+that source tree was identical to the reviewed candidate. The four original public downloads
+and both signed update-channel files were fetched without authentication and
+SHA-256 compared against the audited originals. Required PR checks and the
+post-merge Python 3.11–3.14 CI, secret scan and CodeQL analysis passed.
+
+The original checks below did not detect the stale compiled Version description.
+The new catalogue gate above closes that gap. The current [gallery](images/README.md)
+and downloads reflect the corrected distribution; these earlier results are
+historical evidence, not identifiers for the current artifacts.
 
 ### Final source and native build — 3 November 2026
 
@@ -42,8 +101,8 @@
   Tests use disposable neutral data and make **no live integration calls**; the
   installed kiosk and its service/autostart are not replaced by this verification.
 
-These results describe a locally prepared candidate, not a publication
-announcement. Download only assets present in GitHub Releases. Site commissioning,
+These results describe the candidate subsequently published as v1.2.0.
+Download its verified assets from GitHub Releases. Site commissioning,
 physical finger/glove interaction, full historical-binary round trips, physical
 power-loss testing and multi-month endurance remain deployment acceptance work.
 Passing tests and secret scanning do not certify the absence of every defect or
@@ -91,6 +150,9 @@ without installing over the existing kiosk or enabling external services:
   No new runtime defect was reproduced. Documentation corrections remove obsolete
   fixed-grid/physical-touch-size claims, refresh coverage figures and clarify
   localization, inventory and staging safeguards. Compiled inputs remain unchanged.
+
+<details>
+<summary>Historical v1.2.0 development checks — not the current release status</summary>
 
 ### Earlier development evidence
 
@@ -622,7 +684,9 @@ version. A real multi-day soak on the target touchscreen, compiled-package testi
 and release/update acceptance are still required before releasing 1.2.0. The
 virtual-display stress test is not evidence of months of physical kiosk operation.
 
-## 1.1.0 — release verification
+</details>
+
+## 1.1.0 — release verification (historical)
 
 Verified on 29 September 2026 on Raspberry Pi 5, Raspberry Pi OS 64-bit
 (Debian 13/Trixie), Python 3.13.5 and Tk 8.6. The graphical checks use private X11
@@ -650,7 +714,7 @@ or operating-system image. The first-install bundle targets the OS generation
 above; older OS images may require a native source build. See the site acceptance
 requirements below.
 
-## 1.0.0
+## 1.0.0 (historical)
 
 This records the scope and results of local version 1.0.0 verification. It is not
 certification or a claim that every site integration has been tested. Tests use

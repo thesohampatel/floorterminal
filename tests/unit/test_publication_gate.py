@@ -8,6 +8,7 @@ import shutil
 import tarfile
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +20,61 @@ SPEC.loader.exec_module(gate)
 
 
 class PublicationGateTests(unittest.TestCase):
+    def test_current_catalog_matches_release_notes_and_current_capabilities(self):
+        gate.check_release_catalog(ROOT)
+        features = " ".join(gate.catalog.installed_features()).lower()
+        for topic in (
+            "groups",
+            "self-fix",
+            "failure",
+            "daily",
+            "history",
+            "storage",
+            "connector",
+        ):
+            self.assertIn(topic, features)
+
+    def test_announced_release_rejects_development_wording(self):
+        entry = gate.catalog.installed_entry()
+        for field, text in (
+            ("title", "Development preview — not released"),
+            ("summary", "No release is published yet."),
+        ):
+            with (
+                self.subTest(field=field),
+                self.assertRaisesRegex(gate.AuditError, "development-preview"),
+            ):
+                gate.check_release_catalog(ROOT, replace(entry, **{field: text}))
+
+    def test_release_catalog_requires_a_real_timestamp(self):
+        entry = gate.catalog.installed_entry()
+        for stamp in ("", "2026-02-30T00:00:00Z", "sometime"):
+            with (
+                self.subTest(stamp=stamp),
+                self.assertRaisesRegex(gate.AuditError, "timestamp"),
+            ):
+                gate.check_release_catalog(ROOT, replace(entry, released_utc=stamp))
+
+    def test_release_catalog_cannot_disagree_with_reviewed_notes(self):
+        entry = gate.catalog.installed_entry()
+        for field in ("title", "summary"):
+            with (
+                self.subTest(field=field),
+                self.assertRaisesRegex(gate.AuditError, "description differs"),
+            ):
+                gate.check_release_catalog(
+                    ROOT, replace(entry, **{field: "Old release description"})
+                )
+
+    def test_release_catalog_requires_useful_unique_touch_sized_capabilities(self):
+        entry = gate.catalog.installed_entry()
+        for features in ((), ("Duplicate", "Duplicate"), (" ",), ("x" * 57,)):
+            with (
+                self.subTest(features=features),
+                self.assertRaisesRegex(gate.AuditError, "capabilities"),
+            ):
+                gate.check_release_catalog(ROOT, replace(entry, features=features))
+
     def test_tracked_channel_is_authentic_and_not_ahead_of_the_source(self):
         channel = gate.check_source_metadata(ROOT)
         self.assertLessEqual(

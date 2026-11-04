@@ -99,9 +99,15 @@ class InstallerScriptTests(unittest.TestCase):
     def release(self, version="1.1.0", marker=None):
         source = self.work / f"release-{version}"
         source.mkdir(parents=True, exist_ok=True)
-        (source / trust.EXECUTABLE_NAME).write_bytes(executable_bytes(marker or version))
+        (source / trust.EXECUTABLE_NAME).write_bytes(
+            executable_bytes(marker or version)
+        )
         (source / "VERSION").write_text(f"{version}\n", encoding="utf-8")
-        for name in ("LICENSE", "SOFTWARE_INFORMATION_AND_NOTICES.txt", "SBOM.spdx.json"):
+        for name in (
+            "LICENSE",
+            "SOFTWARE_INFORMATION_AND_NOTICES.txt",
+            "SBOM.spdx.json",
+        ):
             (source / name).write_text(f"{name} for {version}\n", encoding="utf-8")
         for name in ("config.json", "connector.json"):
             (source / name).write_text(json.dumps({"from": version}), encoding="utf-8")
@@ -158,18 +164,26 @@ class InstallerScriptTests(unittest.TestCase):
 
     def test_deployment_data_survives_a_reinstallation(self):
         self.run_installer(self.release("1.0.0"))
-        (self.target / "config.json").write_text('{"line_name": "Site owned"}', encoding="utf-8")
-        (self.target / "connector.json").write_text('{"enabled": false}', encoding="utf-8")
-        (self.target / "response_state.json").write_text('{"status": "DOWN"}', encoding="utf-8")
+        (self.target / "config.json").write_text(
+            '{"line_name": "Site owned"}', encoding="utf-8"
+        )
+        (self.target / "connector.json").write_text(
+            '{"enabled": false}', encoding="utf-8"
+        )
+        (self.target / "response_state.json").write_text(
+            '{"status": "DOWN"}', encoding="utf-8"
+        )
         result = self.run_installer(self.release("1.1.0"))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Preserved existing config.json", result.stdout)
         self.assertIn("Preserved existing connector.json", result.stdout)
         self.assertEqual(
-            json.loads((self.target / "config.json").read_text())["line_name"], "Site owned"
+            json.loads((self.target / "config.json").read_text())["line_name"],
+            "Site owned",
         )
         self.assertEqual(
-            json.loads((self.target / "response_state.json").read_text())["status"], "DOWN"
+            json.loads((self.target / "response_state.json").read_text())["status"],
+            "DOWN",
         )
 
     def test_an_upgrade_keeps_the_earlier_slot_available(self):
@@ -180,6 +194,44 @@ class InstallerScriptTests(unittest.TestCase):
         self.assertEqual(layout.installed_versions(), ("1.0.0", "1.1.0"))
         self.assertEqual(
             layout.slot_executable("1.0.0").read_bytes(), executable_bytes("1.0.0")
+        )
+
+    def test_same_version_reissue_replaces_only_release_files(self):
+        self.assertEqual(
+            self.run_installer(self.release("1.2.0", "original")).returncode, 0
+        )
+        private_files = {
+            "config.json": b'{"line_name":"Deployment-owned line"}',
+            "connector.json": b'{"enabled":false,"custom":"keep"}',
+            "connectors/extra.json": b'{"enabled":false}',
+            "response_state.json": b'{"status":"RUNNING","delivery_outbox":[]}',
+            "settings_auth.json": b'{"fixture":"site-owned settings access"}',
+            "records/history.sqlite3": b"private-history-fixture",
+            "update/journal.json": b'{"fixture":"preserve audit history"}',
+        }
+        for name, data in private_files.items():
+            path = self.target / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        result = self.run_installer(self.release("1.2.0", "corrected"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        layout = InstallLayout(self.target)
+        self.assertEqual(layout.active_version(), "1.2.0")
+        self.assertEqual(layout.active_link.read_bytes(), executable_bytes("corrected"))
+        for name, data in private_files.items():
+            with self.subTest(name=name):
+                self.assertEqual((self.target / name).read_bytes(), data)
+
+    def test_corrupt_same_version_reissue_leaves_existing_executable_intact(self):
+        self.assertEqual(
+            self.run_installer(self.release("1.2.0", "original")).returncode, 0
+        )
+        source = self.release("1.2.0", "corrected")
+        (source / trust.EXECUTABLE_NAME).write_bytes(executable_bytes("corrupt"))
+        self.assertNotEqual(self.run_installer(source).returncode, 0)
+        self.assertEqual(
+            InstallLayout(self.target).active_link.read_bytes(),
+            executable_bytes("original"),
         )
 
     def test_an_earlier_flat_installation_is_migrated_and_preserved(self):
@@ -222,12 +274,21 @@ class InstallerScriptTests(unittest.TestCase):
     def test_installed_files_are_owner_private(self):
         self.run_installer(self.release("1.0.0"))
         layout = InstallLayout(self.target)
-        for path in (self.target, layout.versions_dir, layout.update_dir, layout.staging_dir):
+        for path in (
+            self.target,
+            layout.versions_dir,
+            layout.update_dir,
+            layout.staging_dir,
+        ):
             with self.subTest(path=path.name):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
-        self.assertEqual(stat.S_IMODE(layout.slot_executable("1.0.0").stat().st_mode), 0o700)
+        self.assertEqual(
+            stat.S_IMODE(layout.slot_executable("1.0.0").stat().st_mode), 0o700
+        )
         self.assertEqual(stat.S_IMODE(layout.boot_state.stat().st_mode), 0o600)
-        self.assertEqual(stat.S_IMODE((self.target / "config.json").stat().st_mode), 0o600)
+        self.assertEqual(
+            stat.S_IMODE((self.target / "config.json").stat().st_mode), 0o600
+        )
 
 
 if __name__ == "__main__":
