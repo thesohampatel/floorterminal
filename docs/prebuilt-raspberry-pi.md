@@ -22,6 +22,11 @@ start on an older image, update the supported OS or build from source on that ta
 
 ## 1. Download the release
 
+**Already running v1.2.0?** The corrected distribution retains the same version
+number but has a new build ID and checksum. Follow the
+[same-version reinstall procedure](releases/v1.2.0-reissue.md) rather than treating
+it as a normal USB upgrade. Obtain the current archive and checksum together.
+
 Open the [v1.2.0 release](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.0)
 and download both the Linux ARM64 archive and its separately published SHA-256
 checksum file. Do not download source-code archives when you need

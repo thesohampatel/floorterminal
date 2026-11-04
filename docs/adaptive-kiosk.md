@@ -78,12 +78,14 @@ read-only [automatic device-care](automatic-device-care.md) snapshot.
 
 ## Native previews
 
-### Latest attached-panel previews — 29 October 2026
+### Released v1.2.0 panel captures — 3 November 2026
 
 These native 1920×1200 captures show the revised grouped map, crew cards and
 Settings on the attached Pi display. The group image is an offline rendering
 fixture: Cell 1 is stopped, Cell 2 is responding and Cell 3 continues running.
-The crew names are synthetic; no real service or credentials are used.
+The crew names are synthetic; no real service or credentials are used. All images
+on this page were regenerated from the corrected release source; the
+[gallery manifest](images/v1.2.0/manifest.json) records their dimensions and hashes.
 
 ![Grouped conveyor and station boundaries](images/v1.2.0/render/1920x1200-console.png)
 
@@ -98,11 +100,11 @@ appears only when needed; Back returns without changing the field.
 
 See [measured responsiveness and remaining limits](ui-performance.md#measured-on-the-attached-pi-5).
 
-### Earlier adaptive-layout captures
+### Compact and portrait release captures
 
-These are actual Tk screenshots captured on a private Raspberry Pi display on
-24 October 2026, not mockups or a published release. Each file retains its native
-pixel dimensions. The offline preview enables capability descriptions in memory
+These are actual Tk screenshots of the released v1.2.0 interface captured on a
+private Raspberry Pi display on 3 November 2026. Each file retains its native
+pixel dimensions. The offline fixture enables capability descriptions in memory
 to show the available controls; no connector is configured and network calls are
 blocked. Station names, failure choices and Settings values are neutral examples.
 
@@ -189,8 +191,8 @@ size, overlap and visibility of the default five reasons. The variable-catalogue
 driver additionally checks Others-only through 1,000 reasons and preserves drafts
 across search, paging and Settings station changes. The
 [touch-flow guide](operator-touch-flow.md) explains optional multi-select/search
-steps and contains updated native screenshots. Older layout previews above show
-the earlier development snapshot; the touch-flow images show the current actions.
+steps and contains native screenshots from the same corrected v1.2.0 source.
+The layout and touch-flow images show the released actions at different sizes.
 
 These checks do not replace hands-on commissioning or a multi-day physical soak.
 No external-service API or customer credential is used.
