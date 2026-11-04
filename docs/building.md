@@ -1,5 +1,28 @@
 # Native release builds
 
+## Repository files and release versions
+
+**The current published application is v1.2.0.** GitHub shows the last commit that
+changed each file or folder. An installer, icon or service template can therefore
+show an older commit titled “FloorTerminal 1.0.0” while remaining the correct file
+for v1.2.0. A new release includes every required file, including unchanged ones.
+Those last-change labels are not independently installed component versions.
+
+The application version is declared in `pyproject.toml` and
+`src/floorterminal/__init__.py`; the publication gate checks that they agree.
+The builder writes that value to the runtime bundle's `VERSION` file, and
+`packaging/linux/install.sh` reads it instead of hardcoding a release number.
+The [signed channel](../update-channel/latest.json), release hashes and
+[release notes](releases/v1.2.0.md) identify the current delivered build.
+
+Documentation may be improved on `main` after a binary release without rebuilding
+or retagging that executable. Its private build-input manifest establishes which
+application and packaging files were compiled; documentation-only changes do not
+alter those inputs. Historical release notes, old tags and compatibility version
+thresholds are intentionally retained, not globally renamed to the current version.
+
+## What the builder verifies
+
 The automated builder validates configuration, the project profile,
 `connector.json`, Python syntax, tests, Tk availability, disk space, host
 architecture, legal assets, locale resources, and native build dependencies before

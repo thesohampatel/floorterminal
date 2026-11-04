@@ -264,7 +264,7 @@ No live third-party API was used in development verification.
 
 The same Pi/Tk environment ran 3,000 frames per viewport after 200 warm-up
 frames, with the new adaptive layout and a credential-free, connector-disabled
-configuration. These are current-source measurements, not a comparison of
+configuration. These measure the source at that dated checkpoint, not a comparison of
 identical scenes with the older layout.
 
 | Viewport | Mean frame | p95 frame | RSS growth after warm-up |
@@ -277,21 +277,23 @@ The 9,000 measured frames use synthetic 180-day animation phases. They are not a
 multi-day live deployment test. The revised operator layout uses fewer drawing
 items while preserving workflow, line status, paging and feedback.
 
-## Development preview
+## Released v1.2.0 interface
 
-For the latest operator and narrow Settings layouts, see
+For operator and narrow Settings layouts, see
 [adaptive kiosk previews](adaptive-kiosk.md#native-previews). The Settings images
-below record the earlier 11 October development checkpoint.
+below were regenerated from the corrected v1.2.0 source on **3 November 2026**;
+they do not depict the earlier dated performance checkpoints.
 
-These are native 1600×960 captures of the real, connector-disabled Pi UI, not
-mockups or evidence of a published 1.2.0 release. Scrollable form content may extend
-below its viewport; the Save/Cancel footer stays visible.
+These are native 1600×960 captures of the real Pi UI using disposable offline
+fixtures, not mockups or evidence of a live external-service connection. See the
+[gallery provenance](images/README.md). Longer forms use touch paging and optional
+scrolling; the Save/Cancel footer stays visible.
 
-![Rounded in-window Settings](images/v1.2-development/settings.png)
+![Rounded in-window Settings](images/v1.2.0/settings-line.png)
 
-![Configurable application request budget](images/v1.2-development/connection.png)
+![Configurable application request budget](images/v1.2.0/settings-connector.png)
 
-![Station-specific failure editor](images/v1.2-development/stations.png)
+![Station-specific failure editor](images/v1.2.0/settings-stations.png)
 
 ## Background-delivery verification — 21 October 2026
 
@@ -302,7 +304,7 @@ on the Pi: Information opened and closed, repair began, and production was relea
 before the write returned. The standalone driver recorded 100 heartbeat samples
 with a maximum interval of 70.17 ms and no callback faults.
 
-The current-source renderer ran 5,000 measured frames per viewport after 200
+The renderer at that dated checkpoint ran 5,000 measured frames per viewport after 200
 warm-up frames. Animation phase was advanced synthetically to 180 days:
 
 | Viewport | Mean frame | p95 frame | RSS change after warm-up |
@@ -323,7 +325,7 @@ PYTHONPATH=src python3 tests/unit/render_stress_driver.py --frames 5000 --sizes 
 ```
 
 Both drivers create temporary neutral deployments; the delivery driver blocks
-sockets and uses an in-memory transport. Native development captures are linked
+sockets and uses an in-memory transport. Current release captures are linked
 from [Saved updates](offline-delivery.md).
 
 ## Operator response and device care — 24 October 2026

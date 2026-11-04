@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tomllib
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 from floorterminal import __version__
 from floorterminal.core.config import validate_config
 from floorterminal.integration.definition import IntegrationDefinition
-from floorterminal.update import manifest, trust, version
+from floorterminal.update import catalog, manifest, trust, version
 from scripts.build.build import source_input_manifest
 
 INSTALL_FILES = frozenset(
@@ -133,7 +134,8 @@ def check_source_metadata(root):
         (root / "update-channel/latest.json").read_bytes(),
         (root / "update-channel/latest.json.sig").read_bytes(),
     )
-    check_release_version(channel)
+    if check_release_version(channel):
+        check_release_catalog(root)
     require(
         channel.release.notes_url
         == f"{trust.RELEASES_URL}/tag/v{channel.release.version}",
@@ -155,6 +157,52 @@ def check_source_metadata(root):
         "Public signing descriptor does not match the pinned key",
     )
     return channel
+
+
+def check_release_catalog(root, entry=None):
+    """An announced build must not ship stale development copy in its UI."""
+    entry = catalog.installed_entry() if entry is None else entry
+    require(
+        entry is not None and entry.version == __version__,
+        "Installed release catalog version mismatch",
+    )
+    text = " ".join((entry.title, entry.summary, *entry.features))
+    require(
+        not re.search(
+            r"development preview|not released|unreleased|no release is published",
+            text,
+            re.IGNORECASE,
+        ),
+        "Installed release catalog still contains development-preview text",
+    )
+    require(
+        re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", entry.released_utc or "")
+        is not None,
+        "Installed release catalog has no valid release timestamp",
+    )
+    try:
+        datetime.strptime(entry.released_utc, "%Y-%m-%dT%H:%M:%S%z")
+    except ValueError as exc:
+        raise AuditError(
+            "Installed release catalog has no valid release timestamp"
+        ) from exc
+    notes = json.loads(
+        (Path(root) / "docs/releases" / f"notes-{entry.version}.json").read_text()
+    )
+    require(
+        entry.title == notes["release_title"]
+        and entry.summary == notes["release_summary"],
+        "Installed release description differs from the reviewed release notes",
+    )
+    require(
+        bool(entry.features)
+        and len(set(entry.features)) == len(entry.features)
+        and all(
+            isinstance(feature, str) and 0 < len(feature.strip()) <= 56
+            for feature in entry.features
+        ),
+        "Installed release capabilities are missing, duplicated or too long",
+    )
 
 
 def check_release_version(channel, source_version=None, *, exact=False):

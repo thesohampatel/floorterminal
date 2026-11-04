@@ -152,7 +152,7 @@ bodies are not logging fields. See [automatic device care](automatic-device-care
   30 frames/second). Existing values, including 80 ms, are preserved. Set 33 in
   Settings → System for smoother motion after upgrading. Slow frames never queue
   catch-up bursts, and obscured screens update less frequently.
-- `ui_language`: installed locale key; English is packaged in version 1.0.0.
+- `ui_language`: installed locale key; v1.2.0 ships and verifies the English interface.
 - `ui_color_preset`: `standard`, `colorblind_safe`, or `custom`.
 - `ui_colors`: exact six-digit colors for background, cards, text, muted text,
   status colors, and borders. Contrast checks in Settings reject unsafe choices.

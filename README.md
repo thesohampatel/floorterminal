@@ -1,13 +1,19 @@
 # FloorTerminal
 
-**Version 1.2.0.** Independent production groups, operator self-fix with Engineering
+**Latest stable release: [v1.2.0](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.0)** — published 3 November 2026.
+Independent production groups, operator self-fix with Engineering
 handover, configurable request budgets, persistent team names, flexible station
 failure reasons and adaptive fullscreen kiosk controls.
 [What's new and upgrade precautions](docs/releases/v1.2.0.md) ·
 [Verification and measured limits](docs/verification.md).
-Download only versions and assets published in
-[GitHub Releases](https://github.com/thesohampatel/floorterminal/releases);
-the source version alone does not mean a binary has been published.
+[Download for Raspberry Pi](https://github.com/thesohampatel/floorterminal/releases/download/v1.2.0/floorterminal-v1.2.0-linux-arm64.tar.gz) ·
+[Signed USB update](https://github.com/thesohampatel/floorterminal/releases/download/v1.2.0/floorterminal-v1.2.0-update-linux-arm64.tar.gz) ·
+[Install and verify](docs/prebuilt-raspberry-pi.md) · [Update an existing kiosk](docs/update-user-guide.md).
+
+**Already installed v1.2.0?** Its corrected distribution keeps the same version
+number but has a new executable and checksums. Read the
+[same-version reinstall notice](docs/releases/v1.2.0-reissue.md); the normal USB
+updater will not offer another 1.2.0 as a newer version.
 
 <p align="center">
   <img src="branding/floorterminal/floorterminal-mark.svg" width="176" alt="FloorTerminal logo">
@@ -30,20 +36,34 @@ safety HMI, machine controller, CMMS, shift-reporting system, or attendance tool
 never replaces lockout/tagout, guarding, emergency-stop, permit-to-work, or site
 escalation procedures.
 
-![Neutral offline operator console](docs/images/operator-console.png)
+![FloorTerminal 1.2.0: independent stopped, responding and running station groups](docs/images/v1.2.0/group-console.png)
 
-Screenshots are native-resolution captures of the real Tk application on the Pi's
-graphical display, rendered by the documented capture script — not enlarged thumbnails or
-mockups. Click an image for its original
-pixels. The examples use a **disabled, credential-free connector**: unavailable
-support buttons and **Setup needed** are expected until a site is configured.
-The update panels illustrate documented states; they do not claim that an example
-future version has been published. [Capture method and provenance](docs/images/README.md).
+**The gallery shows the released v1.2.0 application**, freshly rendered on the Pi
+using disposable offline fixtures. Here, separate group borders and conveyor segments
+make stopped, responding and running areas visible together. Click any screenshot
+for its native pixels; none is enlarged or manually redrawn.
+Unavailable support buttons mean no external connector was configured for the
+capture. Some test-driver views use an in-memory service fixture, never a real account.
+Update examples are explicitly illustrative, not future-release announcements.
+[Full gallery, capture method and provenance](docs/images/README.md).
+
+### See the v1.2.0 workflow
+
+![Independent group conveyor motion in v1.2.0](docs/images/v1.2.0/group-motion.webp)
+
+Only the running group's conveyor moves; reporting one group does not automatically
+stop the others. These clips show real renderer output at fixed 24-fps animation
+steps, not a device-performance benchmark. [Group setup and impact rules](docs/station-groups.md).
+
+![Operator self-fix in the released interface](docs/images/v1.2.0/self-fix/operator-response-active.png)
+
+Operators can finish an allowed minor stoppage themselves or request Engineering
+on the **same incident**, keeping its timing and context. [Self-fix and handover](docs/operator-self-fix.md).
 
 The built-in Information panel keeps project ownership, support, licensing, and
 deployment responsibility visible on every installed terminal.
 
-![FloorTerminal software information panel](docs/images/software-information.png)
+![FloorTerminal software information panel](docs/images/v1.2.0/software-information.png)
 
 ## What it provides
 
@@ -78,14 +98,16 @@ deployment responsibility visible on every installed terminal.
 
 ## Download the ready-to-use Raspberry Pi build
 
-Download available builds from [GitHub Releases](https://github.com/thesohampatel/floorterminal/releases).
-Compiled binaries are distributed separately from the source repository. If no
-compatible asset is available, follow the [source build guide](docs/building.md).
+The [v1.2.0 release](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.0)
+contains the ready-to-run Linux ARM64 installation bundle and signed USB update.
+Compiled binaries are distributed separately from the source repository. For a
+different operating-system ABI or architecture, follow the [source build guide](docs/building.md).
 The Raspberry Pi 64-bit ARM application bundle contains the executable, installer,
 autostart/service definitions, neutral configuration, Connector v1 template, license,
 notices, SBOM, deployment instructions, and checksums.
 
-Look for an asset named like:
+Download the installation archive and its
+[SHA-256 file](https://github.com/thesohampatel/floorterminal/releases/download/v1.2.0/floorterminal-v1.2.0-linux-arm64.tar.gz.sha256):
 
 ```text
 floorterminal-v1.2.0-linux-arm64.tar.gz
@@ -125,6 +147,11 @@ Compatibility and verification results are documented in
 [version 1.1.0 release notes](docs/releases/v1.1.0.md) and
 [version 1.0.0 release notes](docs/releases/v1.0.0.md).
 
+**Why does GitHub show an older version beside some folders?** That is the last
+commit that changed those files, not the application's current version. Unchanged
+installer and service files are included in v1.2.0 too. See
+[repository files and release versions](docs/building.md#repository-files-and-release-versions).
+
 ## Software updates
 
 A small indicator beside the information button reports whether the terminal runs
@@ -132,7 +159,7 @@ the newest published version. It is green when up to date, amber when something 
 waiting, and red when availability could not be checked. Every colour is
 non-blocking: reporting, timers, connectors, and Settings behave identically.
 
-![Update indicator states](docs/images/update-indicator-states.png)
+![Update indicator states](docs/images/v1.2.0/update-indicator-states.png)
 
 Updating is offline and manual. Download the update-drive archive from the Releases
 page on any computer, extract it onto a USB drive labelled `FLOORTERM`, and plug the
@@ -140,7 +167,11 @@ drive into the terminal. The terminal verifies the maintainer's Ed25519 signatur
 the executable checksum by itself, then waits for an administrator to authorize the
 change on the touchscreen.
 
-![Software Update panel with a verified update ready](docs/images/update-panel-ready.png)
+![Software Update panel showing installed version 1.2.0](docs/images/v1.2.0/update-panel-current.png)
+
+The current-version screen above is a v1.2.0 documentation fixture. The update
+guide also shows hypothetical next-version states so administrators can recognize
+them; only the public Releases page determines what can actually be downloaded.
 
 Each release is installed in its own version slot and selected by one symbolic link.
 The v1.2.0 updater checks saved-data compatibility and creates private
@@ -172,12 +203,12 @@ same incident to Engineering without resetting its downtime. See the
 offline behaviour and safety limits. The walkthrough below shows the Engineering
 path; the linked guide also illustrates self-fix and handover.
 
-![Illustrative operator report and response walkthrough](docs/images/operator-walkthrough.webp)
+![Illustrative operator report and response walkthrough](docs/images/v1.2.0/operator-walkthrough.webp)
 
 The walkthrough uses example state rendered by the application, with no external
-request. For a non-animated reference, open the [running screen](docs/images/operator-console.png),
-[interruption screen](docs/images/line-interrupted.png), or
-[repair screen](docs/images/response-in-progress.png).
+request. For a non-animated reference, open the [running screen](docs/images/v1.2.0/operator-console.png),
+[interruption screen](docs/images/v1.2.0/line-interrupted.png), or
+[repair screen](docs/images/v1.2.0/response-in-progress.png).
 
 ```text
 RUNNING → select station(s) → optional failure type(s) → report problem
@@ -191,7 +222,7 @@ Touch one or more stations, or **Select the entire line**. Each station has its 
 failure list. Selecting a failure is optional, so an unknown cause never prevents a
 report. **Others** permits an optional touchscreen note.
 
-![Station-specific failure selection](docs/images/station-failure-selection.png)
+![Station-specific failure selection](docs/images/v1.2.0/station-failure-selection.png)
 
 ### 2. Report the interruption
 
@@ -244,7 +275,8 @@ fills the kiosk; long forms have touch-sized Previous/Next controls and optional
 drag/wheel movement, while dialogs keep their action buttons visible.
 See [adaptive kiosk layouts and commissioning](docs/adaptive-kiosk.md) for the
 usability minimum, native preview images, verification and physical-screen checks.
-The walkthrough images show the current interface with disposable offline data.
+All linked interface images were refreshed from the released v1.2.0 source,
+including group, self-fix, crew, failure catalogue and Settings screens.
 
 The production map is a unidirectional line. Conveyor rollers, drive elements,
 process indicators, and products animate only while running; motion and borders
@@ -253,10 +285,12 @@ borders, motion, and color so color is never the only signal. Layout derives fro
 active window dimensions rather than a hardcoded resolution, and dialogs remain
 inside the current display.
 
-![Actual running conveyor animation](docs/images/conveyor-motion.webp)
+![Version 1.2.0 single-line conveyor renderer animation](docs/images/v1.2.0/conveyor-motion.webp)
 
-This recording shows the real conveyor animation. It is downsampled from native
-1600×960 frames to reduce download size; none of the documentation images is upscaled.
+This clip uses real application-rendered frames at fixed 24-fps animation steps.
+It is downsampled from native 1600×960 frames to reduce download size; none of the
+documentation images is upscaled. Measured kiosk performance is documented
+separately in [verification](docs/verification.md).
 
 ## Settings at a glance
 
@@ -289,9 +323,9 @@ runtime state, not inserted into the connector or editable configuration.
 <details>
 <summary>View high-resolution Settings screenshots</summary>
 
-![General terminal settings](docs/images/settings-line.png)
-![Connector discovery and configuration status](docs/images/settings-connector.png)
-![Station-specific failure configuration](docs/images/settings-stations.png)
+![General terminal settings](docs/images/v1.2.0/settings-line.png)
+![Connector discovery and configuration status](docs/images/v1.2.0/settings-connector.png)
+![Station-specific failure configuration](docs/images/v1.2.0/settings-stations.png)
 
 </details>
 

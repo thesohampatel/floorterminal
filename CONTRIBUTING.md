@@ -10,7 +10,7 @@ Contributions are welcome under the MIT License.
 
    ```bash
    PYTHONPATH=src python3 -m unittest discover -s tests -v
-   ruff check src tests scripts/build/build.py
+   ruff check src tests scripts main.py
    ```
 
 5. Explain operational, security, compatibility, and migration effects in the

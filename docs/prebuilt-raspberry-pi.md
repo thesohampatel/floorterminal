@@ -22,12 +22,17 @@ start on an older image, update the supported OS or build from source on that ta
 
 ## 1. Download the release
 
-Open the repository's **Releases** area and select the required version. For version
-1.2.0, download both the Linux ARM64 archive and its separately published SHA-256
+**Already running v1.2.0?** The corrected distribution retains the same version
+number but has a new build ID and checksum. Follow the
+[same-version reinstall procedure](releases/v1.2.0-reissue.md) rather than treating
+it as a normal USB upgrade. Obtain the current archive and checksum together.
+
+Open the [v1.2.0 release](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.0)
+and download both the Linux ARM64 archive and its separately published SHA-256
 checksum file. Do not download source-code archives when you need
 the ready-to-run executable.
 
-Recommended asset names:
+The published installation files are:
 
 ```text
 floorterminal-v1.2.0-linux-arm64.tar.gz

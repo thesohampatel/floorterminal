@@ -1,16 +1,16 @@
 {
   "archive": {
     "name": "floorterminal-v1.2.0-linux-arm64.tar.gz",
-    "sha256": "a9f9473f056eccc4e22bec15870160b80777f14abcc19c4ebd59cff57734225b"
+    "sha256": "ea381cc0fc9213fc9f8a831590d34d0d79b4b0c071f02611019acc5d51c76cab"
   },
   "document_type": "update_channel",
   "product_id": "floorterminal",
-  "published_utc": "2026-11-03T13:39:22Z",
+  "published_utc": "2026-11-04T00:39:54Z",
   "release": {
     "artifact": {
       "name": "floorterminal",
-      "sha256": "c11cc784d5f0f9d003d2e79d68e795d1e7607cba6786eaccc910afa1824038f0",
-      "size_bytes": 15263984
+      "sha256": "9c547e123aadb4c049c9eb04b7660fad41ef92d107eb2987803183fac5a450c5",
+      "size_bytes": 15262392
     },
     "features": [
       "Independent production groups with group-only or whole-line stop propagation and concurrent responses",
@@ -21,6 +21,8 @@
       "Adaptive fullscreen kiosk Settings, touch feedback and stable group/conveyor animation"
     ],
     "fixes": [
+      "Correct the installed-version description and complete the v1.2.0 capability catalogue",
+      "Refresh the release gallery and reject preview wording during publication checks",
       "Avoid repeated crew-directory requests and preserve cooldown deadlines across restarts",
       "Retain operator decisions and queued updates through network loss and failed acknowledgements",
       "Prevent animation item churn and unnecessary redraws beneath static dialogs",
@@ -32,7 +34,7 @@
     "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.0",
     "release_summary": "Local-first production response with independent station groups, operator self-fix and handover, flexible failure reasons, daily saved-team refresh, adaptive kiosk controls and safer offline updates.",
     "release_title": "FloorTerminal 1.2.0",
-    "released_utc": "2026-11-03T13:39:22Z",
+    "released_utc": "2026-11-04T00:39:54Z",
     "security": [
       "Bounded strict JSON, private state/checkpoints and hardened audit-file handling",
       "Ambiguous writes require verified idempotency or explicit protected reconciliation",

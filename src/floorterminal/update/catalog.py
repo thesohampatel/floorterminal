@@ -27,14 +27,21 @@ class CatalogEntry:
 CATALOG = (
     CatalogEntry(
         version="1.2.0",
-        released_utc="",
-        title="Development preview — not released",
+        released_utc="2026-11-04T00:14:07Z",
+        title="FloorTerminal 1.2.0",
         summary=(
-            "Configurable request budgets, bounded retained rendering, immediate "
-            "touch feedback, adaptive layouts and durable background delivery. "
-            "No release is published yet."
+            "Local-first production response with independent station groups, "
+            "operator self-fix and handover, flexible failure reasons, daily "
+            "saved-team refresh, adaptive kiosk controls and safer offline updates."
         ),
         features=(
+            "Independent groups with group-only or whole-line stops",
+            "Concurrent incidents and group-specific conveyors",
+            "Operator self-fix and same-incident Engineering handover",
+            "User-defined failure catalogues with automatic Others",
+            "Daily saved-team refresh and offline crew selection",
+            "Private incident history and standalone reporting",
+            "Automatic bounded storage care and device checks",
             "Configurable rolling-minute application request budget",
             "Local-first incident and planned Engineering workflows",
             "Atomic line release with durable, retried follow-ups",
@@ -50,6 +57,7 @@ CATALOG = (
             "Per-station failures and editable responder assignments",
             "Connector v1 mappings and independent capabilities",
             "Signed offline USB updates with one-touch rollback",
+            "Connector-preserving updates and compatibility checks",
         ),
     ),
     CatalogEntry(

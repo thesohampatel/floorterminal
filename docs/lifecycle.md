@@ -14,10 +14,12 @@ agreement, or a warranty; the [MIT License](../LICENSE) terms are unchanged.
 | Latest release on `main` | Supported | Yes | The only line that receives fixes |
 | Any earlier release | Unsupported | No | Update before deploying |
 
-One line is supported at a time. A terminal can always fall back to the previously
-installed version through the rollback path, but a rolled-back terminal is running an
-unsupported version and should be returned to the supported one once the defect that
-prompted the rollback is resolved.
+One line is supported at a time. A terminal can restore a retained, accepted
+previous version only when its saved data is compatible and no active response or
+pending synchronization blocks the change. Unsafe downgrades are refused; see
+[data compatibility](update-data-compatibility.md). A rolled-back terminal is
+running an unsupported version and should return to the supported one once the
+defect that prompted rollback is resolved.
 
 ## Defect handling
 
@@ -48,8 +50,10 @@ a release and the schedule for doing so.
 - A terminal reports whether a newer version exists whenever it can reach the
   release channel, and reports plainly when it cannot.
 - Nothing is installed without administrator authorization at the terminal.
-- The previously accepted version stays installed for one-touch rollback, and a
-  version that cannot start is restored automatically.
+- The previously accepted version is retained for compatible, authorized rollback.
+  A supervised trial that repeatedly fails to start can restore its accepted
+  previous slot. This recovery requires intact storage and a valid retained slot;
+  it is not a guarantee against arbitrary storage or operating-system failure.
 - Operating system, firmware, and dependency patching for the Raspberry Pi remain the
   deployment owner's responsibility and are outside this application's update path.
 
@@ -57,9 +61,11 @@ a release and the schedule for doing so.
 
 When a version line is retired, the retirement is announced in the changelog and the
 release notes, stating the final version, the reason, and the recommended successor.
-Retirement removes maintenance, not function: an installed terminal keeps running,
-and its recorded data stays readable, because state and logs are plain JSON and JSON
-Lines with a documented schema version.
+Retirement removes maintenance, not function: installed software has no retirement
+switch. Recovery state and logs use JSON and JSON Lines; v1.2.0 also stores its
+versioned incident archive in `records/incidents.sqlite3`. Follow the
+[history and backup guide](local-history.md) to retain readable records. Normal
+storage retention still applies; retirement does not preserve records indefinitely.
 
 If the project itself is discontinued, the MIT License permits any deployer to
 continue building, modifying, and distributing it. The reproducible items a successor
