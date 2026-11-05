@@ -257,19 +257,23 @@ class KioskViewMixin(GroupViewMixin):
             )
             self.modal["delivery_id"] = previous.get("selected_id")
         elif (
-            key in {"ui_delivery_retry", "ui_delivery_archive"}
+            key in {"ui_delivery_retry", "ui_delivery_archive", "ui_delivery_dismiss"}
             and self.modal
             and self.modal["kind"] == "delivery"
         ):
             item_id = self.modal.get("selected_id")
             self.modal = None
-            self.request_admin_access(
-                "delivery_archive" if key.endswith("archive") else "delivery_retry"
-            )
+            self.request_admin_access(key.removeprefix("ui_"))
+            if self.modal is None:
+                # The signed-update health trial can temporarily block admin
+                # actions. Keep that protection without dereferencing no dialog.
+                return
             self.modal["delivery_id"] = item_id
             self.modal["prompt"] = (
                 "Acknowledge this expired help request; it will not be sent."
                 if key.endswith("archive")
+                else "Check the external chat first. Dismiss this notice without sending; retain its audit record."
+                if key.endswith("dismiss")
                 else "Verify the remote system first. Retrying an uncertain write can duplicate it."
             )
         elif (
@@ -464,6 +468,35 @@ class KioskViewMixin(GroupViewMixin):
     def kiosk_feedback(self):
         w = self.viewport().width
         right = header_regions(w)[3]
+        entries = self.state.get("delivery_outbox", [])
+        held = sum(item["phase"] == "attention" for item in entries)
+        show_delivery = bool(getattr(self, "delivery", None)) and (
+            self.provider.connected or self.has_queued_sync()
+        )
+        feedback_right = right
+        if show_delivery:
+            size = 136 if right > 440 else 64
+            feedback_right = right - size - 8
+            label = (
+                (
+                    f"Review · {held}"
+                    if held
+                    else f"Delivery · {len(entries)}"
+                    if entries
+                    else "Delivery"
+                )
+                if size > 64
+                else (
+                    f"! {held}" if held else f"↑ {len(entries)}" if entries else "Sync"
+                )
+            )
+            self.kiosk_button(
+                "ui_delivery",
+                (right - size, 62, right, 106),
+                label,
+                "#FFF2E0" if held else self.PALE_BLUE,
+                fg=self.TEXT if held else self.BLUE,
+            )
         syncing = bool(getattr(getattr(self, "delivery", None), "active", None))
         busy = self.busy and getattr(self, "busy_message", "")
         toast = time.monotonic() < self.toast_until
@@ -479,22 +512,6 @@ class KioskViewMixin(GroupViewMixin):
             accent = {"error": self.RED, "success": self.GREEN}.get(
                 self.toast_kind, self.BLUE
             )
-        elif self.has_queued_sync():
-            entries = self.state.get("delivery_outbox", [])
-            held = sum(item["phase"] == "attention" for item in entries)
-            wait = max(0, int(self.state.get("delivery_pause_until", 0) - time.time()))
-            message = f"{self.queued_sync_count()} saved updates"
-            message += (
-                f" • {held} need review"
-                if held
-                else " • sending in background"
-                if syncing
-                else f" • retry in {wait}s"
-                if wait
-                else " • automatic delivery"
-            )
-            message += " • tap for details"
-            accent = self.RED if held else self.ORANGE
         elif self.state.get("escalated_at") and self.state["status"] == "DOWN":
             message, accent = self.t("escalated"), self.RED
         else:
@@ -509,7 +526,8 @@ class KioskViewMixin(GroupViewMixin):
                     "Standalone reporting • saved on this terminal • no external delivery",
                     self.GREEN,
                 )
-        self.rounded(12, 64, right, 104, 12, "#F0F4FA", self.BORDER)
+        if busy or toast:
+            self.rounded(12, 64, feedback_right, 104, 12, "#F0F4FA", self.BORDER)
         if busy or syncing:
             self.canvas.create_arc(
                 24,
@@ -524,13 +542,11 @@ class KioskViewMixin(GroupViewMixin):
             )
         else:
             self.canvas.create_oval(28, 80, 36, 88, fill=accent, outline="")
-        self.row_label((52, 64, right - 12, 104), message, 9, self.TEXT, "normal")
-        if not busy and not toast and self.has_queued_sync():
-            self.hitboxes[
-                "ui_delivery" if getattr(self, "delivery", None) else "sync_pending"
-            ] = (12, 60, right, 108)
-        elif busy or toast:
-            self.hitboxes["ui_feedback"] = (12, 60, right, 108)
+        self.row_label(
+            (46, 64, feedback_right - 8, 104), message, 9, self.TEXT, "normal"
+        )
+        if busy or toast:
+            self.hitboxes["ui_feedback"] = (12, 60, feedback_right, 108)
 
     def kiosk_line(self, box, phase):
         x1, y1, x2, y2 = box
@@ -1064,7 +1080,12 @@ class KioskViewMixin(GroupViewMixin):
         buttons = [item for item in support_buttons(self.config) if item["enabled"]]
         for button, box in zip(buttons, boxes):
             label, key = button["label"], button["key"]
-            if self.provider.INFO.supports_messaging and button["destination"].strip():
+            standalone = self.config.get("reporting_mode") == "local"
+            if (
+                not standalone
+                and self.provider.INFO.supports_messaging
+                and button["destination"].strip()
+            ):
                 self.kiosk_button(
                     ("ui_call_" if modal else "") + key,
                     box,
@@ -1077,7 +1098,7 @@ class KioskViewMixin(GroupViewMixin):
                 self.rounded(*box, 14, "#F1F4F8", self.BORDER)
                 self.row_label(
                     (box[0] + 6, box[1], box[2] - 6, box[3]),
-                    label + " · Not set up",
+                    label + (" · Standalone" if standalone else " · Not set up"),
                     9,
                     self.MUTED,
                     anchor="center",

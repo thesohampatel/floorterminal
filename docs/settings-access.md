@@ -14,7 +14,7 @@ controls. Merely compiling or hashing a publicly known password does not make it
 
 ## Change it from the touchscreen
 
-![Administrator access in the System tab](images/v1.2.1/settings-access.png)
+![Administrator access in the System tab](images/v1.2.2/settings-access.png)
 
 1. Open the sliders/Settings button on the main screen.
 2. Enter your administrator name or ID, then the current Settings password.
@@ -36,7 +36,7 @@ The screenshots below show v1.2.1.
 The [v1.2.1 release notes](releases/v1.2.1.md) explain these changes;
 the [current gallery](images/README.md) shows landscape and portrait layouts.
 
-![Protected password change using the touch keyboard](images/v1.2.1/settings-password.png)
+![Protected password change using the touch keyboard](images/v1.2.2/settings-password.png)
 
 Fresh authorization expires after five minutes. Mismatches do not change access.
 Cancel leaves the existing password and other unsaved Settings edits unchanged.

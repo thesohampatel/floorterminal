@@ -2,6 +2,27 @@
 
 This project follows semantic versioning for published releases.
 
+## 1.2.2 — 5 November 2026
+
+- Replace the persistent queued/review warning strip with a compact Delivery
+  control and a destination-aware delivery centre.
+- Add administrator-protected dismissal of held chat notices with retained audit
+  evidence; incident and equipment updates cannot be dismissed.
+- Expose retry for held help calls before expiry, refresh corrected recipient
+  directories, and confirm help delivery only after its acknowledgement is saved.
+- New support calls use the current connection independently of older incidents.
+- Expire stale help even during outages/quota pauses and visibly disable new
+  external support calls in standalone mode.
+- Hold unexpected 2xx responses for review, avoiding duplicate writes caused by
+  an incomplete connector success-code mapping.
+- Distinguish actual local record references from ordinary `local:` message text.
+- Use measured responsive cards for Information and Software Update content;
+  keep detailed setup/support information in the Version tab.
+
+See [v1.2.2 notes](docs/releases/v1.2.2.md). No deployment credentials or customer
+configuration are distributed. Signed ARM64 installation and USB-update downloads
+accompany this release; existing configuration and connectors are preserved.
+
 ## 1.2.1 — 4 November 2026
 
 - Dedicated, fixed-width `HH:MM:SS` local-time display, separated from the line

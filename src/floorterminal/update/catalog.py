@@ -26,6 +26,28 @@ class CatalogEntry:
 
 CATALOG = (
     CatalogEntry(
+        version="1.2.2",
+        released_utc="2026-11-05T16:26:07Z",
+        title="FloorTerminal 1.2.2",
+        summary=(
+            "More reliable message delivery and review, a compact delivery centre, "
+            "and responsive information and software-update cards."
+        ),
+        features=(
+            "Durable, rate-limited help and lifecycle messaging",
+            "Compact delivery indicator and protected message review",
+            "Audited dismissal of reviewed chat notices",
+            "Responsive information and software-update cards",
+            "Independent groups and concurrent local-first incidents",
+            "Operator self-fix and same-incident Engineering handover",
+            "Configurable support shortcuts and request budget",
+            "Flexible station failure choices and touch keyboard",
+            "Daily saved-team refresh and offline crew selection",
+            "Private incident history and automatic storage care",
+            "Signed USB updates and connector-preserving rollback",
+        ),
+    ),
+    CatalogEntry(
         version="1.2.1",
         released_utc="2026-11-04T14:47:02Z",
         title="FloorTerminal 1.2.1",

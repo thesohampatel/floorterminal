@@ -85,18 +85,18 @@ Settings on the attached Pi display. The group image is an offline rendering
 fixture: Cell 1 is stopped, Cell 2 is responding and Cell 3 continues running.
 The crew names are synthetic; no real service or credentials are used. All images
 on this page were regenerated from the corrected release source; the
-[gallery manifest](images/v1.2.1/manifest.json) records their dimensions and hashes.
+[gallery manifest](images/v1.2.2/manifest.json) records their dimensions and hashes.
 
-![Grouped conveyor and station boundaries](images/v1.2.1/render/1920x1200-console.png)
+![Grouped conveyor and station boundaries](images/v1.2.2/render/1920x1200-console.png)
 
-![Adaptive crew cards](images/v1.2.1/panel/native-engineers.png)
+![Adaptive crew cards](images/v1.2.2/panel/native-engineers.png)
 
-![Fullscreen Settings with rounded fields](images/v1.2.1/panel/native-settings-general.png)
+![Fullscreen Settings with rounded fields](images/v1.2.2/panel/native-settings-general.png)
 
 The compact option sheet uses readable labels and large tiles. Filtering/paging
 appears only when needed; Back returns without changing the field.
 
-![Touch-sized Settings option sheet](images/v1.2.1/controls/settings-choice-800x480.png)
+![Touch-sized Settings option sheet](images/v1.2.2/controls/settings-choice-800x480.png)
 
 See [measured responsiveness and remaining limits](ui-performance.md#measured-on-the-attached-pi-5).
 
@@ -113,39 +113,39 @@ blocked. Station names, failure choices and Settings values are neutral examples
 The line and primary workflow remain together. Station illustrations give way to
 larger text-only station targets when height is limited.
 
-![Compact landscape operator screen](images/v1.2.1/layout/kiosk-800x480.png)
+![Compact landscape operator screen](images/v1.2.2/layout/kiosk-800x480.png)
 
 ### Portrait — 480×800
 
 Station paging preserves touch size; the workflow and support calls stack.
 
-![Portrait operator screen](images/v1.2.1/layout/kiosk-480x800.png)
+![Portrait operator screen](images/v1.2.2/layout/kiosk-480x800.png)
 
 ### Large landscape — 1920×1080
 
 The same interface uses the available space without stretching tiny controls
 across the monitor. Open the image to inspect it at its native resolution.
 
-![Large landscape operator screen](images/v1.2.1/layout/kiosk-1920x1080.png)
+![Large landscape operator screen](images/v1.2.2/layout/kiosk-1920x1080.png)
 
 ### Settings in both orientations
 
 Category navigation reflows while the form retains unsaved edits. Large page
 controls navigate long forms independently of the always-visible Save/Cancel footer.
 
-![Landscape Settings](images/v1.2.1/layout/settings-0-800x480.png)
+![Landscape Settings](images/v1.2.2/layout/settings-0-800x480.png)
 
-![Portrait station and failure editor](images/v1.2.1/layout/settings-2-480x800.png)
+![Portrait station and failure editor](images/v1.2.2/layout/settings-2-480x800.png)
 
-Also available: [portrait General settings](images/v1.2.1/layout/settings-0-480x800.png)
-and [landscape station editor](images/v1.2.1/layout/settings-2-800x480.png).
+Also available: [portrait General settings](images/v1.2.2/layout/settings-0-480x800.png)
+and [landscape station editor](images/v1.2.2/layout/settings-2-800x480.png).
 
 ### Protected kiosk keyboard
 
 Administrator identity/password entry stays inside the same fullscreen page.
 Typing and confirmation controls stay visible, without opening a desktop dialog.
 
-![Fullscreen kiosk authorization page](images/v1.2.1/self-fix/kiosk-password.png)
+![Fullscreen kiosk authorization page](images/v1.2.2/self-fix/kiosk-password.png)
 
 ## Usability boundaries and commissioning
 

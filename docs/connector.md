@@ -1,5 +1,9 @@
 # External connector contract v1
 
+For support destinations, success-code mappings and held-message recovery, see
+[help calls and automatic messages](message-delivery.md). Connector schema v1
+continues unchanged in application v1.2.2.
+
 Application version numbers do not change this file's schema number. Existing
 compatible schema-1 connectors are preserved during USB upgrades; do not replace
 them with a new release's example. See [update compatibility and preservation](update-data-compatibility.md).
@@ -282,7 +286,7 @@ Record and asset creation require either valid idempotency or this explicit hold
 policy; omission is still rejected. Use a reviewed deduplicating gateway if the
 site requires unattended recovery from every ambiguous write.
 
-In **Saved updates**, a held creation can be linked to its verified existing record.
+In the **Delivery** centre, a held creation can be linked to its verified existing record.
 A held asset event can be reconciled using **Verify existing event**, an external
 event ID/audit reference and administrator authentication. Verify the exact asset,
 state and event time, not just its current Online/Offline value. This records human

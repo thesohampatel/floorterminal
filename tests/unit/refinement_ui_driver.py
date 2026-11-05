@@ -177,6 +177,52 @@ def main():
             app.modal = {"kind": "update", "page": "status"}
             render()
             capture(f"update-{width}x{height}.png")
+            from floorterminal.storage.delivery import enqueue
+
+            app.modal = None
+            entry = enqueue(
+                app.state,
+                app.provider.remote,
+                "send_message",
+                [
+                    "Demonstration support",
+                    "Offline verification notice. No assistance required.",
+                ],
+                {},
+                expires_at=time.time() + 300,
+            )
+            entry.update(
+                phase="attention", error="Recipient configuration needs review"
+            )
+            app.toast_until = 0
+            render()
+            assert "ui_delivery" in app.hitboxes
+            capture(f"delivery-control-{width}x{height}.png")
+            tap("ui_delivery")
+            assert "ui_delivery_retry" in app.hitboxes, (
+                "Unexpired help must offer protected retry"
+            )
+            assert "ui_delivery_dismiss" in app.hitboxes
+            capture(f"delivery-review-{width}x{height}.png")
+            tap("ui_delivery_dismiss")
+            assert app.modal["kind"] == "password"
+            assert app.modal["purpose"] == "delivery_dismiss"
+            assert entry in app.state["delivery_outbox"], (
+                "Dismiss must require administrator authorization"
+            )
+            app.state["delivery_outbox"] = []
+            app.modal = {"kind": "delivery", "item": 0}
+            render()
+            assert "ui_delivery_dismiss" not in app.hitboxes
+            assert "ui_delivery_retry" not in app.hitboxes
+            visible = [
+                app.canvas.itemcget(item, "text")
+                for item in app.canvas.find_all()
+                if app.canvas.type(item) == "text"
+            ]
+            assert "Queue empty" in visible
+            assert not any("have been delivered" in text for text in visible)
+            capture(f"delivery-empty-{width}x{height}.png")
             cases += 1
         from floorterminal.ui.settings import SettingsWindow
 

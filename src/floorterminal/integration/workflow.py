@@ -525,12 +525,6 @@ class ConfiguredIntegration:
         # Resolve all applicable directories before choosing. A group and person
         # with the same display name must never silently select the wrong target.
         for kind in routes:
-            if (
-                wanted in self.name_cache[kind]
-                and self.name_cache[kind][wanted] is None
-            ):
-                self._cached_identifier(kind, wanted)
-        for kind in routes:
             items = self._paged_collection(kind + "s", "list_" + kind + "s")
             self._cache_directory(
                 None,
@@ -564,11 +558,6 @@ class ConfiguredIntegration:
             raise RuntimeError(f"Configure a {resource} name first")
         if resource not in {"team", "conversation"}:
             raise RuntimeError(f"Unsupported lookup resource: {resource}")
-        if (
-            wanted in self.name_cache[resource]
-            and self.name_cache[resource][wanted] is None
-        ):
-            return self._cached_identifier(resource, wanted)
         semantic = "list_teams" if resource == "team" else "list_conversations"
         items = self._paged_collection(resource + "s", semantic)
         matches = [

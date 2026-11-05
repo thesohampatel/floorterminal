@@ -10,15 +10,15 @@ and confirm the change on the touchscreen. The terminal checks the update by its
 before it will install anything. It can restore a retained previous version when
 that version can safely use the terminal's current data.
 
-**Upgrading from v1.2.0 to v1.2.1:** use this normal signed USB flow. The
+**Upgrading from v1.2.0 or v1.2.1 to v1.2.2:** use this normal signed USB flow. The
 historical same-version reinstall exception applies only when replacing 1.2.0
-with another 1.2.0 build, not to the newer 1.2.1 release.
+with another 1.2.0 build, not to the newer 1.2.2 release.
 
-The walkthrough uses v1.2.1 screenshots with illustrative next-version states.
+The walkthrough uses v1.2.2 screenshots with illustrative next-version states.
 Only [published releases](https://github.com/thesohampatel/floorterminal/releases)
 identify software that is actually available to download.
 
-![Walkthrough of an offline update](images/v1.2.1/update-walkthrough.gif)
+![Walkthrough of an offline update](images/v1.2.2/update-walkthrough.gif)
 
 ---
 
@@ -27,7 +27,7 @@ identify software that is actually available to download.
 A small round indicator sits between the clock and the blue **i** information
 button. It is the only thing this feature adds to the everyday screen.
 
-![The update indicator in each of its three states](images/v1.2.1/update-indicator-states.png)
+![The update indicator in each of its three states](images/v1.2.2/update-indicator-states.png)
 
 | Indicator | What it means | What you should do |
 |---|---|---|
@@ -40,7 +40,7 @@ selection, restoration, Settings, sounds, and the connector all behave exactly t
 same whether the indicator is green, amber, or red. If the whole update feature
 failed to start, the console still runs normally.
 
-Installation is a maintenance operation. The v1.2.1 updater requires
+Installation is a maintenance operation. The current updater requires
 an idle, synchronized terminal. Allow its two-minute health check after restart
 before reporting/Settings writes resume. These new safeguards are not retroactively
 present in already-published older binaries.
@@ -53,33 +53,35 @@ Touch the indicator to open the Software Update panel. It has four tabs.
 
 ### Update status
 
-![Software Update panel when the terminal is up to date](images/v1.2.1/update-panel-current.png)
+![Software Update panel when the terminal is up to date](images/v1.2.2/update-panel-current.png)
 
 - what version this terminal is running and how it was installed;
 - what the newest published version is, when it is known;
-- the three steps for performing an update;
-- who to contact for help.
+- the next action for checking or installing a signed update;
+- whether attention is needed before proceeding.
 
 ### This version
 
 Everything the running version can do, taken from the build itself — so it is
 accurate even with no network and no drive attached.
+In v1.2.2 this tab also keeps the official release address, USB folder/label and
+maintainer contact information, leaving Status focused on the next action.
 
-![The capabilities included in the running version](images/v1.2.1/update-panel-version.png)
+![The capabilities included in the running version](images/v1.2.2/update-panel-version.png)
 
 ### What is new
 
 The changes in the version that is waiting to be installed, or in the newest
 published version, split into new features, fixes, and security changes.
 
-![Changes contained in the waiting version](images/v1.2.1/update-panel-changes.png)
+![Changes contained in the waiting version](images/v1.2.2/update-panel-changes.png)
 
 ### Update activity
 
 Every installation, rollback, and automatic recovery this terminal has performed,
 with the name of the person who authorized it.
 
-![Update activity recorded on the terminal](images/v1.2.1/update-panel-activity.png)
+![Update activity recorded on the terminal](images/v1.2.2/update-panel-activity.png)
 
 ---
 
@@ -161,7 +163,7 @@ Within a few seconds the terminal:
 4. copies the verified program onto the terminal;
 5. turns the update indicator amber, shows a message, and opens the panel.
 
-![The console after a verified update drive is inserted](images/v1.2.1/update-console-amber.png)
+![The console after a verified update drive is inserted](images/v1.2.2/update-console-amber.png)
 
 Nothing has changed yet. The terminal is still running the old version, and it will
 keep running it until a person authorizes the change.
@@ -174,13 +176,13 @@ that is not newer than the one already installed.
 
 Open the Software Update panel and touch **INSTALL VERSION x.y.z**.
 
-![The panel with a verified update ready to install](images/v1.2.1/update-panel-ready.png)
+![The panel with a verified update ready to install](images/v1.2.2/update-panel-ready.png)
 
 The terminal asks for the administrator name and then the Settings password — the
 same authorization used for Settings and for closing the kiosk. The administrator
 identity and authorized action are recorded in the update log, **not the password**.
 
-![Administrator authorization before a version change](images/v1.2.1/update-panel-authorization.png)
+![Administrator authorization before a version change](images/v1.2.2/update-panel-authorization.png)
 
 In the v1.2.0 updater, an active response, parked group incident or
 unfinished synchronization blocks the change. Finish and synchronize that work,
@@ -240,7 +242,7 @@ before the update is never modified or deleted while it can still be needed.
 
 ## When the indicator is red
 
-![The panel when the terminal cannot reach the release channel](images/v1.2.1/update-panel-blocked.png)
+![The panel when the terminal cannot reach the release channel](images/v1.2.2/update-panel-blocked.png)
 
 The most common reason is simply that the terminal has no internet access, which is
 normal and often deliberate on a factory network. It means the terminal cannot tell

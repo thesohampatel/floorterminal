@@ -7,7 +7,7 @@ other active groups. The group overview explains each group's configured impact.
 
 Site safety and escalation procedures always take precedence over this console.
 
-## Display layout in v1.2.1
+## Display layout in v1.2.2
 
 The interface adapts to your kiosk window automatically. Portrait screens stack
 actions; short screens keep the station map and workflow actions together.
@@ -77,7 +77,7 @@ is not a shift/check-in feature. The steps below describe Engineering response.
 In v1.2.0, local repair and production release do not need to wait for
 an external record ID. Supported status, crew, comment, asset and chat operations
 are saved in a separate delivery journal and resumed after restart. Touch the
-queued-updates strip to open **Saved updates**. Automatic retries honor service
+**Delivery** control to open the delivery centre (v1.2.2). Automatic retries honor service
 and local budget delays; uncertain writes need administrator review rather than
 blind replay. Completion messages describe the local release and queued external
 updates without falsely claiming external confirmation. See

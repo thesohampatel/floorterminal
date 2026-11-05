@@ -322,6 +322,10 @@ class DialogMixin:
                 "ACKNOWLEDGE EXPIRED HELP",
                 "This request will be recorded as expired, not sent",
             ),
+            "delivery_dismiss": (
+                "DISMISS REVIEWED MESSAGE",
+                "Check the external chat first. This removes the notice, not its audit record",
+            ),
             "delivery_link": (
                 "LINK VERIFIED RECORD",
                 "Only link the existing record for this exact line event",
@@ -512,6 +516,9 @@ class DialogMixin:
                 self.modal = {"kind": "delivery", "item": 0}
             elif purpose == "delivery_archive":
                 self.delivery.archive_expired_notice(delivery_id, administrator)
+                self.modal = {"kind": "delivery", "item": 0}
+            elif purpose == "delivery_dismiss":
+                self.delivery.dismiss_reviewed_message(delivery_id, administrator)
                 self.modal = {"kind": "delivery", "item": 0}
             elif purpose == "delivery_link":
                 self.delivery.link_reviewed_record(

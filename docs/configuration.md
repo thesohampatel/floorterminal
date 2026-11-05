@@ -53,6 +53,12 @@ Disabling all slots removes the support entry. Selection/incident state is not
 changed. Requests already queued retain their original destination and message.
 [Detailed behavior and migration](releases/v1.2.1.md).
 
+In v1.2.2, standalone mode marks these external controls unavailable. Connected
+mode saves calls before sending, then confirms service acceptance separately.
+Use `conversation:Name` or `user:Name` for explicit group/person routing. New calls
+use the current connector; already saved messages keep their original destination.
+[Delivery review and troubleshooting](message-delivery.md).
+
 ### Incident and automatic notification routing
 
 Timing values control escalation, micro-stop classification, animation, and refresh

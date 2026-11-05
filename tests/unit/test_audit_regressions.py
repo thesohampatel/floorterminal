@@ -201,7 +201,18 @@ class AuditRegressions(GroupHarness):
             collections = [None, None, None]
             collections[("team", "conversation", "user").index(resource)] = records
             remote._cache_directory(*collections)
-            with self.assertRaisesRegex(RuntimeError, "Multiple configured"):
+            # The fresh bounded directory, not a permanent name-cache sentinel,
+            # is authoritative. Ambiguous current names must still never send.
+            with (
+                mock.patch.object(
+                    remote,
+                    "_paged_collection",
+                    side_effect=lambda collection, *_args, records=records, resource=resource: (
+                        records if collection == resource + "s" else []
+                    ),
+                ),
+                self.assertRaisesRegex(RuntimeError, "Multiple configured"),
+            ):
                 if resource == "team":
                     remote.resolve_name(resource, "Example")
                 else:
