@@ -87,13 +87,13 @@ Captured from the actual Tk app on an isolated Raspberry Pi virtual display on
 26 October 2026, with neutral fixtures, socket connections blocked and no provider
 credentials. Images retain their native dimensions; they are not mockups.
 
-![Station reasons and direct report actions at 800×480](images/v1.2.1/touch/report-800x480.png)
+![Station reasons and direct report actions at 800×480](images/v1.2.2/touch/report-800x480.png)
 
-![Quick crew participation at 800×480](images/v1.2.1/touch/crew-800x480.png)
+![Quick crew participation at 800×480](images/v1.2.2/touch/crew-800x480.png)
 
-![Compact map and workflow together at 320×400](images/v1.2.1/touch/main-320x400.png)
+![Compact map and workflow together at 320×400](images/v1.2.2/touch/main-320x400.png)
 
-![Completion confirmation at the minimum viewport](images/v1.2.1/touch/resume-320x400.png)
+![Completion confirmation at the minimum viewport](images/v1.2.2/touch/resume-320x400.png)
 
 ## Verification and site acceptance
 

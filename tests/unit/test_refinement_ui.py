@@ -1,4 +1,4 @@
-"""Run the v1.2.1 touch regression on a real Tk display when available."""
+"""Run touch, information and delivery regressions on a real Tk display."""
 
 import json
 import os

@@ -1,0 +1,25 @@
+{
+  "release_title": "FloorTerminal 1.2.2",
+  "release_summary": "More reliable message delivery and review, a compact delivery centre, and responsive information and software-update cards.",
+  "minimum_upgradable_version": "1.0.0",
+  "features": [
+    "Compact delivery control with counts instead of a persistent full-width warning bar",
+    "Delivery centre shows destination, saved message, time, attempts and recovery guidance",
+    "Administrator-authorized dismissal of reviewed chat notices with retained audit evidence",
+    "Measured responsive cards for Information and Software Update screens"
+  ],
+  "fixes": [
+    "Refresh corrected recipient directories instead of trusting stale ambiguous names",
+    "Hold unexpected successful HTTP responses for review instead of automatically repeating a possibly accepted message",
+    "Route new support calls through the current connector without changing existing incident routing",
+    "Allow reviewed, unexpired help requests to be retried from the delivery screen",
+    "Make stale help notices reviewable during outages or quota pauses, and do not claim external delivery in standalone mode",
+    "Do not mistake ordinary message text containing local: for a pending record identifier",
+    "Confirm help delivery only after the service response has been saved"
+  ],
+  "security": [
+    "Message dismissal never removes incident records, equipment transitions or active deliveries",
+    "Uncertain non-idempotent writes remain protected against automatic duplicate retries",
+    "No connector credentials or customer setup are included in source, captures or build output"
+  ]
+}

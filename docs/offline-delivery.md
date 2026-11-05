@@ -1,6 +1,6 @@
 # Offline reporting and saved updates
 
-This describes **v1.2.0**. Older installations retain their original delivery
+This describes **v1.2.2**. Older installations retain their original delivery
 behavior until upgraded; check the version in Information.
 
 Independent groups share the same delivery journal. Routing is captured per
@@ -19,16 +19,16 @@ Responders can start work, change the crew and restore production while delivery
 is pending. Once that physical incident is completed, another incident can be
 recorded; each keeps a separate identifier and timestamps.
 
-The feedback strip distinguishes local progress from external delivery. Touch its
-queued-updates message to open **Saved updates**. Its pages explain the operation,
-delivery state, attempt count, identifier and any problem. Nothing covers the
+The compact **Delivery** control distinguishes local progress from external delivery.
+Touch it to open the delivery centre. Its pages explain the destination, saved
+message, delivery state, attempt count and any problem. Nothing covers the
 station controls or changes the physical line status merely because a network
 response arrives late.
 
-![Saved-updates review on an 800×480 Pi viewport](images/v1.2.1/delivery/delivery-800x480.png)
+![Saved-updates review on an 800×480 Pi viewport](images/v1.2.2/delivery/delivery-800x480.png)
 
 This is a neutral offline development capture, not a real service response.
-[Full HD capture](images/v1.2.1/delivery/delivery-1920x1080.png).
+[Full HD capture](images/v1.2.2/delivery/delivery-1920x1080.png).
 
 - **Saved / queued:** recorded on this kiosk, not yet confirmed by the external
   service. Do not report the same incident again to clear this indication.
@@ -75,8 +75,14 @@ Transient roster-refresh errors schedule another attempt after the backoff.
 
 Chat/person and team names must be unique within the searched directory. An
 ambiguous name is rejected, never silently routed to the last returned person.
-Named conversations take precedence over people, as before; use distinct names
-and commission the selected recipients at the site.
+An unqualified name matching both a group and a person is rejected. Use
+`conversation:Name` or `user:Name` to choose the intended route explicitly;
+commission the selected recipients at the site. Completed lookup snapshots expire
+normally, and an authorized message retry refreshes them after corrections.
+
+Held messages can be dismissed by an administrator after external verification;
+their audit evidence remains and they are not marked delivered. Incident and
+equipment updates cannot be dismissed. See [message delivery](message-delivery.md).
 
 ## What survives restart
 
@@ -122,7 +128,7 @@ the service accepted it. Such an operation is held for review instead of being
 automatically repeated. Authentication, permissions and validation failures also
 need review; retrying them continuously cannot repair configuration.
 
-1. Open **Saved updates** and identify the affected operation.
+1. Open the **Delivery** centre and identify the affected operation.
 2. Check the external system for that exact line event. Correct the connector or
    permissions if necessary.
 3. If it is absent and retrying is appropriate, choose **Review / retry** and
@@ -156,8 +162,9 @@ chat message does not prevent unrelated records or status updates from proceedin
 Lifecycle operations have no automatic expiry. Help requests, unlike historical
 incident updates, become misleading if delivered long after help was needed.
 After their original 15-minute window they are retained as **expired**, not sent.
-An administrator can **Acknowledge expiry** to remove that expired notice from
-the pending journal; the audit log records the decision. Request help again with
+An administrator can **Dismiss notice** to remove that reviewed notice from
+the pending journal; the audit log records the decision without claiming delivery.
+Expiry is processed even during an outage or quota pause. Request help again with
 current conditions if it is still needed.
 
 The delivery journal accepts up to **512 operations / 2 MiB**. This bounds memory,

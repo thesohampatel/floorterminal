@@ -91,7 +91,7 @@ solely because a unique field exists or a duplicate POST returns 409.
 
 Use `"delivery": {"ambiguous_result": "hold"}` instead of `idempotency`.
 This sends the intent without inventing an unsupported header. Uncertain writes
-stop for administrator review, not automatic replay. In Saved updates:
+stop for administrator review, not automatic replay. In the Delivery centre:
 
 - Check whether the exact record exists; link its ID if it does.
 - For an asset-history event, verify its asset, state and original event time, then

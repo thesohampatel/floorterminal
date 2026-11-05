@@ -2112,6 +2112,11 @@ class WorkflowMixin:
         return "MICRO-STOP" if int(seconds) <= threshold else "DOWNTIME EVENT"
 
     def call_team(self, name):
+        if self.config.get("reporting_mode") == "local":
+            self.notify(
+                "Standalone mode • external support calls are disabled", "info", 5
+            )
+            return
         slot = name.lower()
         button = next(
             (item for item in support_buttons(self.config) if item["key"] == slot), None

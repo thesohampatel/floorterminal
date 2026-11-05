@@ -44,6 +44,14 @@ rewriting operator evidence. See [catalogue usage](failure-reasons.md).
 
 ## Application layers
 
+In v1.2.2, `ui/content_cards.py` measures responsive information cards with
+bounded touch-pagination fallback. `ui/delivery_view.py` owns the delivery centre;
+`services/delivery.py` still owns expiry, retry, dispatch and acknowledgement.
+New manual support calls bind to the current connector, separately from an older
+incident's frozen routing. Message dismissal is administrator-protected, audited,
+and limited to held chat notices. The journal schema and connector contract stay
+unchanged. No additional runtime dependencies or animation timers are introduced.
+
 For v1.2.1, `core/support.py` owns the validated three-slot manual
 support configuration and resolves legacy defaults without changing incident or
 automatic-notification routing. `ui/support_settings.py` edits those slots inside

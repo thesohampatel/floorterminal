@@ -305,11 +305,11 @@ fixtures, not mockups or evidence of a live external-service connection. See the
 [gallery provenance](images/README.md). Longer forms use touch paging and optional
 scrolling; the Save/Cancel footer stays visible.
 
-![Rounded in-window Settings](images/v1.2.1/settings-line.png)
+![Rounded in-window Settings](images/v1.2.2/settings-line.png)
 
-![Configurable application request budget](images/v1.2.1/settings-connector.png)
+![Configurable application request budget](images/v1.2.2/settings-connector.png)
 
-![Station-specific failure editor](images/v1.2.1/settings-stations.png)
+![Station-specific failure editor](images/v1.2.2/settings-stations.png)
 
 ## Background-delivery verification — 21 October 2026
 
@@ -342,7 +342,7 @@ PYTHONPATH=src python3 tests/unit/render_stress_driver.py --frames 5000 --sizes 
 
 Both drivers create temporary neutral deployments; the delivery driver blocks
 sockets and uses an in-memory transport. Current release captures are linked
-from [Saved updates](offline-delivery.md).
+from [the delivery centre](offline-delivery.md).
 
 ## Operator response and device care — 24 October 2026
 

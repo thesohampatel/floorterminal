@@ -357,6 +357,29 @@ class ConnectorCompatibilityTests(unittest.TestCase):
         app.send_message("user:Support", "Verified recipient")
         self.assertTrue(wire.requests[-1].url.endswith("/users/5/messages"))
 
+    def test_corrected_directory_replaces_stale_ambiguous_recipient(self):
+        wire = Wire(
+            response({"conversations": [{"id": 4, "name": "Support"}]}),
+            response({}, 201),
+        )
+        app = self.provider(wire)
+        app.name_cache["conversation"]["support"] = None
+        app.send_message("conversation:Support", "Verified recipient")
+        self.assertTrue(wire.requests[-1].url.endswith("/conversations/4/messages"))
+
+    def test_unexpected_success_is_not_a_retryable_message_failure(self):
+        wire = Wire(
+            response({"conversations": [{"id": 4, "name": "Support"}]}),
+            response({"private_response": "must not appear in error"}, 202),
+        )
+        app = self.provider(wire)
+        with self.assertRaises(IntegrationError) as raised:
+            app.send_message("conversation:Support", "Verify once")
+        self.assertEqual(raised.exception.code, "INVALID_RESPONSE")
+        self.assertEqual(raised.exception.status, 202)
+        self.assertNotIn("private_response", str(raised.exception))
+        self.assertEqual(len(wire.requests), 2)
+
     def test_strict_numeric_coercion(self):
         app = self.provider(Wire())
         app.field_types.update(asset_id="integer", assignee_id="number")

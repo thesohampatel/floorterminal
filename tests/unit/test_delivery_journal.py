@@ -164,6 +164,119 @@ class DurableDeliveryHarness(WorkflowHarness):
 
 
 class DurableDeliveryTests(DurableDeliveryHarness):
+    def test_delivery_review_waits_safely_during_update_health_trial(self):
+        app = self.local_app()
+        app.version_trial_active = lambda: True
+        for key in ("ui_delivery_retry", "ui_delivery_dismiss"):
+            app.modal = {"kind": "delivery", "selected_id": "held-entry"}
+            app.handle_layout_control(key)
+            self.assertIsNone(app.modal)
+            self.assertIn("health check", app.toast_text)
+
+    def test_standalone_mode_never_claims_an_external_help_call_was_queued(self):
+        app = self.local_app()
+        app.config["reporting_mode"] = "local"
+        app.call_team("engineering")
+        self.assertEqual(app.state["delivery_outbox"], [])
+        self.assertEqual(self.transport.requests, [])
+        self.assertIn("disabled", app.toast_text)
+
+    def test_expired_help_is_reviewable_without_a_connection_or_during_quota_pause(
+        self,
+    ):
+        for configured in (False, True):
+            with self.subTest(configured=configured):
+                app = self.local_app(configured=configured)
+                entry = enqueue(
+                    app.state,
+                    app.provider.remote,
+                    "send_message",
+                    ["Support", "Stale help"],
+                    {},
+                    expires_at=time.time() - 1,
+                )
+                app.state["delivery_pause_until"] = time.time() + 600
+                app.delivery.poll()
+                self.assertEqual(entry["phase"], "attention")
+                app.delivery.dismiss_reviewed_message(entry["id"], "Administrator")
+                self.assertEqual(app.state["delivery_outbox"], [])
+                self.assertEqual(self.transport.requests, [])
+
+    def test_message_with_literal_local_prefix_is_not_stuck_as_a_dependency(self):
+        app = self.local_app()
+        app.call_team("engineering")
+        item = app.state["delivery_outbox"][0]
+        item["args"][1] += "\nOperator note: local: sensor reset attempted"
+        self.assertEqual(self.drain(app), [])
+        self.assertIn("delivered to the service", app.toast_text)
+        self.assertEqual(
+            len([r for r in self.transport.requests if r.method == "POST"]), 1
+        )
+
+    def test_new_support_call_uses_current_connection_not_old_incident_binding(self):
+        app = self.local_app()
+        app.state["issue_zones"] = ["Station 1"]
+        self.action(app, app.report_downtime)
+        old = app.state["incident_scope"]["connector_binding"]
+        app.provider.remote.definition.data["identity"]["name"] = "Replacement service"
+        app.call_team("engineering")
+        message = app.state["delivery_outbox"][-1]
+        self.assertEqual(message["method"], "send_message")
+        self.assertEqual(message["binding"], binding(app.provider.remote))
+        self.assertNotEqual(message["binding"], old)
+        self.assertEqual(app.state["delivery_outbox"][0]["binding"], old)
+
+    def test_success_code_mismatch_holds_message_instead_of_duplicating(self):
+        app = self.local_app()
+        app.provider.send_message("Engineering", "Request support")
+        item = app.state["delivery_outbox"][0]
+        item["safe_retry"] = False
+        app.delivery._apply(
+            item["id"],
+            None,
+            IntegrationError("Check success_codes", "INVALID_RESPONSE", 202),
+            True,
+        )
+        self.assertEqual(item["phase"], "attention")
+        self.assertIn("uncertain", item["error"])
+        self.drain(app)
+        self.assertEqual(self.transport.requests, [])
+
+    def test_held_messages_can_be_dismissed_with_audit_and_survive_restart(self):
+        app = self.local_app()
+        app.provider.send_message("Engineering", "Old notification")
+        item = app.state["delivery_outbox"][0]
+        with self.assertRaises(RuntimeError):
+            app.delivery.dismiss_reviewed_message(item["id"], "Administrator")
+        item["phase"] = "attention"
+        app.delivery.dismiss_reviewed_message(item["id"], "Administrator")
+        self.assertEqual(self.local_app().state["delivery_outbox"], [])
+        audit = app.logger.named("message_dismissed_after_review")[0]
+        self.assertEqual(audit["outcome"], "dismissed_not_confirmed")
+        self.assertEqual(audit["content"], "Old notification")
+        self.assertEqual(self.transport.requests, [])
+
+    def test_dismiss_never_discards_production_updates(self):
+        app = self.local_app()
+        app.provider.set_response_record_status("R1", "DONE")
+        item = app.state["delivery_outbox"][0]
+        item["phase"] = "attention"
+        with self.assertRaises(RuntimeError):
+            app.delivery.dismiss_reviewed_message(item["id"], "Administrator")
+        self.assertEqual(len(app.state["delivery_outbox"]), 1)
+
+    def test_reviewed_message_retry_refreshes_corrected_directory(self):
+        app = self.local_app()
+        remote = app.provider.remote
+        remote._paged_collection("conversations", "list_conversations")
+        self.assertTrue(remote.directory_progress)
+        app.provider.send_message("Engineering", "Try again after correction")
+        item = app.state["delivery_outbox"][0]
+        item["phase"] = "attention"
+        app.delivery.retry_reviewed(item["id"], "Administrator")
+        self.assertEqual(remote.directory_progress, {})
+        self.assertEqual(item["phase"], "queued")
+
     def test_full_workflow_offline_restart_then_delivery_no_remote_state_regression(
         self,
     ):

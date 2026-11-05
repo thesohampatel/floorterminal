@@ -4,13 +4,17 @@ import math
 import time
 
 from ..update import trust
+from .content_cards import ContentCardsMixin
+from .delivery_view import DeliveryViewMixin
 from .information import InformationViewMixin
 from .keyboard_layout import keyboard_page
 from .layout import split_row, text_pages
 from .operational_dialogs import OperationalDialogMixin
 
 
-class AdaptiveDialogMixin(OperationalDialogMixin, InformationViewMixin):
+class AdaptiveDialogMixin(
+    OperationalDialogMixin, InformationViewMixin, ContentCardsMixin, DeliveryViewMixin
+):
     def dialog_shell(self, title, detail="", *, footer_rows=1):
         view = self.viewport()
         # Full kiosk page, not a floating desktop dialog. Keep long text readable
@@ -183,89 +187,7 @@ class AdaptiveDialogMixin(OperationalDialogMixin, InformationViewMixin):
             self.dialog_actions(footer, actions)
             return
         if kind == "delivery":
-            entries = self.state.get("delivery_outbox", [])
-            index = min(self.modal.get("item", 0), max(0, len(entries) - 1))
-            item = entries[index] if entries else None
-            self.modal["selected_id"] = item["id"] if item else None
-            can_link = (
-                item
-                and item["phase"] == "attention"
-                and item["method"] == "create_response_record"
-            )
-            can_confirm_asset = (
-                item
-                and item["phase"] == "attention"
-                and item["method"] == "set_asset_status"
-            )
-            rows = (
-                3
-                if (can_link or can_confirm_asset) and self.viewport().width < 620
-                else 2
-            )
-            body, footer = self.dialog_shell(
-                "SAVED UPDATES",
-                f"{index + 1 if entries else 0} / {len(entries)} • local workflow stays available",
-                footer_rows=rows,
-            )
-            paragraphs = [
-                ("DELIVERY", "No external deliveries remain in this journal.")
-            ]
-            if item:
-                paragraphs = [
-                    (
-                        item["method"].replace("_", " ").upper(),
-                        f"State: {item['phase']} • attempts: {item['attempts']}",
-                    ),
-                    ("DETAILS", self.delivery.explanation(item)),
-                    ("IDENTIFIER", item["id"]),
-                    (
-                        "REVIEW",
-                        "After verifying the connected system and correcting configuration, an administrator may authorize a retry. An uncertain non-idempotent request can create duplicates if retried without checking.",
-                    ),
-                ]
-            self.paragraph_page(body, paragraphs)
-            actions = [
-                ("ui_delivery_prev", "Previous item", None, self.TEXT),
-                ("ui_delivery_next", "Next item", None, self.TEXT),
-            ]
-            if item and item["phase"] == "attention" and item["expires_at"] is None:
-                actions.append(
-                    ("ui_delivery_retry", "Review / retry", self.PALE_BLUE, self.BLUE)
-                )
-            elif (
-                item
-                and item["phase"] == "attention"
-                and item["expires_at"] <= time.time()
-            ):
-                actions.append(
-                    (
-                        "ui_delivery_archive",
-                        "Acknowledge expiry",
-                        self.PALE_BLUE,
-                        self.BLUE,
-                    )
-                )
-            if can_link:
-                actions.append(
-                    (
-                        "ui_delivery_link",
-                        "Link existing record",
-                        self.PALE_BLUE,
-                        self.BLUE,
-                    )
-                )
-            if can_confirm_asset:
-                actions.append(
-                    (
-                        "ui_delivery_asset_confirm",
-                        "Verify existing event",
-                        self.PALE_BLUE,
-                        self.BLUE,
-                    )
-                )
-            actions.append(("cancel", "Close", None, self.TEXT))
-            self.dialog_actions(footer, actions)
-            return
+            return self.delivery_dialog()
         if kind == "offline_crew":
             body, footer = self.dialog_shell(
                 "ENGINEERING TEAM",
@@ -538,13 +460,14 @@ class AdaptiveDialogMixin(OperationalDialogMixin, InformationViewMixin):
                     )
                 text_box = (a, b + 132, c, d)
             paragraphs = [
-                ("STATUS", status.detail),
+                ("Your terminal", status.detail),
                 (
-                    "OFFLINE UPDATES",
-                    f"Download a signed update from the project Releases page. Label the drive {trust.UPDATE_VOLUME_LABELS[0]} and place the extracted package in {trust.UPDATE_PACKAGE_DIRNAME}. Insert the drive and choose Scan drive. Installation requires administrator authorization; reporting remains available.",
+                    "Next step",
+                    (
+                        "Insert your signed update USB drive and choose Scan drive. "
+                        "Review the version before authorizing installation. Your configuration and connectors are preserved."
+                    ),
                 ),
-                ("RELEASE SOURCE", trust.RELEASES_URL),
-                ("SUPPORT", trust.MAINTAINER_NAME + " • " + trust.MAINTAINER_EMAIL),
             ]
             if not version_cards:
                 paragraphs.insert(
@@ -559,6 +482,12 @@ class AdaptiveDialogMixin(OperationalDialogMixin, InformationViewMixin):
             paragraphs = [
                 ("THIS VERSION", entry.summary if entry else status.installed_version),
                 ("CAPABILITIES", "\n".join(status.installed_features)),
+                ("OFFICIAL RELEASES", trust.RELEASES_URL),
+                ("SUPPORT", trust.MAINTAINER_NAME + " • " + trust.MAINTAINER_EMAIL),
+                (
+                    "USB PACKAGE",
+                    f"Drive label: {trust.UPDATE_VOLUME_LABELS[0]}\nFolder: {trust.UPDATE_PACKAGE_DIRNAME}",
+                ),
             ]
         elif page == "changes":
             staged, channel = status.staged, status.channel
@@ -612,7 +541,7 @@ class AdaptiveDialogMixin(OperationalDialogMixin, InformationViewMixin):
                     + f" • {max(0, int(time.monotonic() - getattr(self, 'busy_started', time.monotonic())))}s",
                 ),
             )
-        self.paragraph_page(text_box, paragraphs)
+        self.content_cards(text_box, paragraphs)
         actions = [("cancel", self.t("close_panel"), None, self.TEXT)]
         if not self.busy:
             actions.extend(

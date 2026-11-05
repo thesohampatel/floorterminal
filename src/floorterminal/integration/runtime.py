@@ -636,6 +636,16 @@ class IntegrationClient:
     def _raise_http_error(self, prepared, operation_id, exc, started, attempt):
         """Normalize one final HTTP failure without exposing request data."""
         self._rates(exc.headers)
+        if 200 <= exc.status < 300:
+            # A write may already have succeeded. Never classify a connector's
+            # incomplete success_codes mapping as a transient transport failure.
+            # Do not echo a potentially sensitive successful response as an error.
+            raise IntegrationError(
+                f"Service returned HTTP {exc.status}, which is not in this operation's "
+                "success_codes. Check remote delivery before correcting the connector or retrying.",
+                "INVALID_RESPONSE",
+                exc.status,
+            ) from exc
         error_map = self.definition.data.get("response", {}).get("error_status_map", {})
         code = error_map.get(str(exc.status), "UNKNOWN")
         delay = retry_after_seconds(exc.headers)

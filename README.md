@@ -1,16 +1,17 @@
 # FloorTerminal
 
-**Latest stable release: [v1.2.1](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.1)** — 4 November 2026.
-A clearer seconds clock, balanced touch keyboard, consistent failure-choice cards,
-three configurable support shortcuts and refreshed Information/Update pages.
+**Latest stable release: [v1.2.2](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.2)** — 5 November 2026.
+Messaging reliability fixes, a compact Delivery centre with protected review and
+dismissal, and responsive Information/Update cards.
 All existing independent-group, self-fix and local-first reporting features remain.
-[What's new and upgrade precautions](docs/releases/v1.2.1.md) ·
+[What's new and upgrade precautions](docs/releases/v1.2.2.md) ·
+[Message troubleshooting](docs/message-delivery.md) ·
 [Verification and measured limits](docs/verification.md).
-[Download for Raspberry Pi](https://github.com/thesohampatel/floorterminal/releases/download/v1.2.1/floorterminal-v1.2.1-linux-arm64.tar.gz) ·
-[Signed USB update](https://github.com/thesohampatel/floorterminal/releases/download/v1.2.1/floorterminal-v1.2.1-update-linux-arm64.tar.gz) ·
+[Download for Raspberry Pi](https://github.com/thesohampatel/floorterminal/releases/download/v1.2.2/floorterminal-v1.2.2-linux-arm64.tar.gz) ·
+[Signed USB update](https://github.com/thesohampatel/floorterminal/releases/download/v1.2.2/floorterminal-v1.2.2-update-linux-arm64.tar.gz) ·
 [Install and verify](docs/prebuilt-raspberry-pi.md) · [Update an existing kiosk](docs/update-user-guide.md).
 
-**Already running v1.2.0?** Use the normal signed USB upgrade to 1.2.1. Keep your
+**Already running v1.2.0 or v1.2.1?** Use the normal signed USB upgrade to 1.2.2. Keep your
 connector files, configuration and Settings password. Finish active responses and
 pending delivery before updating; allow the two-minute health check after restart.
 
@@ -35,9 +36,9 @@ safety HMI, machine controller, CMMS, shift-reporting system, or attendance tool
 never replaces lockout/tagout, guarding, emergency-stop, permit-to-work, or site
 escalation procedures.
 
-![FloorTerminal 1.2.1: independent stopped, responding and running station groups](docs/images/v1.2.1/group-console.png)
+![FloorTerminal 1.2.2: independent stopped, responding and running station groups](docs/images/v1.2.2/group-console.png)
 
-**The gallery shows the released v1.2.1 application**, freshly rendered on the Pi
+**The gallery shows v1.2.2**, freshly rendered on the Pi
 using disposable offline fixtures. Here, separate group borders and conveyor segments
 make stopped, responding and running areas visible together. Click any screenshot
 for its native pixels; none is enlarged or manually redrawn.
@@ -46,28 +47,33 @@ capture. Some test-driver views use an in-memory service fixture, never a real a
 Update examples are explicitly illustrative, not future-release announcements.
 [Full gallery, capture method and provenance](docs/images/README.md).
 
-### See the v1.2.1 workflow
+### See the v1.2.2 workflow
 
-![Independent group conveyor motion in v1.2.1](docs/images/v1.2.1/group-motion.webp)
+![Independent group conveyor motion in v1.2.2](docs/images/v1.2.2/group-motion.webp)
 
 Only the running group's conveyor moves; reporting one group does not automatically
 stop the others. These clips show real renderer output at fixed 24-fps animation
 steps, not a device-performance benchmark. [Group setup and impact rules](docs/station-groups.md).
 
-![Operator self-fix in the released interface](docs/images/v1.2.1/self-fix/operator-response-active.png)
+![Operator self-fix in v1.2.2](docs/images/v1.2.2/self-fix/operator-response-active.png)
 
 Operators can finish an allowed minor stoppage themselves or request Engineering
 on the **same incident**, keeping its timing and context. [Self-fix and handover](docs/operator-self-fix.md).
 
-[Seconds clock](docs/images/v1.2.1/refinements/main-800x480.png) ·
-[Touch keyboard](docs/images/v1.2.1/refinements/keyboard-800x480.png) ·
-[Equal-size failure choices](docs/images/v1.2.1/refinements/failure-grid-800x480.png) ·
+[Seconds clock](docs/images/v1.2.2/refinements/main-800x480.png) ·
+[Touch keyboard](docs/images/v1.2.2/refinements/keyboard-800x480.png) ·
+[Equal-size failure choices](docs/images/v1.2.2/refinements/failure-grid-800x480.png) ·
 [Configure support shortcuts](docs/releases/v1.2.1.md#choose-the-home-screen-support-buttons).
 
 The built-in Information panel keeps project ownership, support, licensing, and
 deployment responsibility visible on every installed terminal.
 
-![FloorTerminal software information panel](docs/images/v1.2.1/software-information.png)
+In v1.2.2, a compact **Delivery** control opens destination-aware message review.
+Held chat notices can be dismissed with administrator authorization and retained
+audit evidence; incident and equipment updates cannot be cleared that way.
+[How queued, delivered, expired and held messages work](docs/message-delivery.md).
+
+![FloorTerminal software information panel](docs/images/v1.2.2/software-information.png)
 
 ## What it provides
 
@@ -102,7 +108,7 @@ deployment responsibility visible on every installed terminal.
 
 ## Download the ready-to-use Raspberry Pi build
 
-The [v1.2.1 release](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.1)
+The [v1.2.2 release](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.2)
 contains the ready-to-run Linux ARM64 installation bundle and signed USB update.
 Compiled binaries are distributed separately from the source repository. For a
 different operating-system ABI or architecture, follow the [source build guide](docs/building.md).
@@ -111,10 +117,10 @@ autostart/service definitions, neutral configuration, Connector v1 template, lic
 notices, SBOM, deployment instructions, and checksums.
 
 Download the installation archive and its
-[SHA-256 file](https://github.com/thesohampatel/floorterminal/releases/download/v1.2.1/floorterminal-v1.2.1-linux-arm64.tar.gz.sha256):
+[SHA-256 file](https://github.com/thesohampatel/floorterminal/releases/download/v1.2.2/floorterminal-v1.2.2-linux-arm64.tar.gz.sha256):
 
 ```text
-floorterminal-v1.2.1-linux-arm64.tar.gz
+floorterminal-v1.2.2-linux-arm64.tar.gz
 ```
 
 This is an application bundle—not a Raspberry Pi OS disk image. Install Raspberry Pi
@@ -122,9 +128,9 @@ OS 64-bit with a graphical session first; then download and extract the bundle o
 Pi. The short installation path is:
 
 ```bash
-sha256sum -c floorterminal-v1.2.1-linux-arm64.tar.gz.sha256
-tar -xzf floorterminal-v1.2.1-linux-arm64.tar.gz
-cd floorterminal-v1.2.1-linux-arm64
+sha256sum -c floorterminal-v1.2.2-linux-arm64.tar.gz.sha256
+tar -xzf floorterminal-v1.2.2-linux-arm64.tar.gz
+cd floorterminal-v1.2.2-linux-arm64
 sha256sum -c SHA256SUMS
 chmod +x install.sh floorterminal-launch floorterminal
 ./install.sh
@@ -147,13 +153,13 @@ troubleshooting. Later versions install offline from a signed USB drive; see the
 [update guide](docs/update-user-guide.md). Users who do not trust or cannot use the prebuilt artifact can follow
 [Native release builds](docs/building.md) to reproduce it from source on their Pi.
 Compatibility and verification results are documented in
-[Version 1.2.1 release notes](docs/releases/v1.2.1.md),
+[Version 1.2.2 release notes](docs/releases/v1.2.2.md),
 [version 1.1.0 release notes](docs/releases/v1.1.0.md) and
 [version 1.0.0 release notes](docs/releases/v1.0.0.md).
 
 **Why does GitHub show an older version beside some folders?** That is the last
 commit that changed those files, not the application's current version. Unchanged
-installer and service files are included in v1.2.1 too. See
+installer and service files are included in v1.2.2 too. See
 [repository files and release versions](docs/building.md#repository-files-and-release-versions).
 
 ## Software updates
@@ -163,7 +169,7 @@ the newest published version. It is green when up to date, amber when something 
 waiting, and red when availability could not be checked. Every colour is
 non-blocking: reporting, timers, connectors, and Settings behave identically.
 
-![Update indicator states](docs/images/v1.2.1/update-indicator-states.png)
+![Update indicator states](docs/images/v1.2.2/update-indicator-states.png)
 
 Updating is offline and manual. Download the update-drive archive from the Releases
 page on any computer, extract it onto a USB drive labelled `FLOORTERM`, and plug the
@@ -171,14 +177,14 @@ drive into the terminal. The terminal verifies the maintainer's Ed25519 signatur
 the executable checksum by itself, then waits for an administrator to authorize the
 change on the touchscreen.
 
-![Software Update panel showing installed version 1.2.1](docs/images/v1.2.1/update-panel-current.png)
+![Software Update panel showing installed version 1.2.2](docs/images/v1.2.2/update-panel-current.png)
 
-The current-version screen above is a v1.2.1 documentation fixture. The update
+The current-version screen above is a v1.2.2 documentation fixture. The update
 guide also shows hypothetical next-version states so administrators can recognize
 them; only the public Releases page determines what can actually be downloaded.
 
 Each release is installed in its own version slot and selected by one symbolic link.
-The v1.2.1 updater checks saved-data compatibility and creates private
+The v1.2.2 updater checks saved-data compatibility and creates private
 local checkpoints before changing versions. Compatible connector files stay intact;
 missing configuration extensions lost by an older Settings writer can be restored
 without overwriting current edits. Unsafe downgrades are refused instead of dropping
@@ -207,12 +213,12 @@ same incident to Engineering without resetting its downtime. See the
 offline behaviour and safety limits. The walkthrough below shows the Engineering
 path; the linked guide also illustrates self-fix and handover.
 
-![Illustrative operator report and response walkthrough](docs/images/v1.2.1/operator-walkthrough.webp)
+![Illustrative operator report and response walkthrough](docs/images/v1.2.2/operator-walkthrough.webp)
 
 The walkthrough uses example state rendered by the application, with no external
-request. For a non-animated reference, open the [running screen](docs/images/v1.2.1/operator-console.png),
-[interruption screen](docs/images/v1.2.1/line-interrupted.png), or
-[repair screen](docs/images/v1.2.1/response-in-progress.png).
+request. For a non-animated reference, open the [running screen](docs/images/v1.2.2/operator-console.png),
+[interruption screen](docs/images/v1.2.2/line-interrupted.png), or
+[repair screen](docs/images/v1.2.2/response-in-progress.png).
 
 ```text
 RUNNING → select station(s) → optional failure type(s) → report problem
@@ -226,7 +232,7 @@ Touch one or more stations, or **Select the entire line**. Each station has its 
 failure list. Selecting a failure is optional, so an unknown cause never prevents a
 report. **Others** permits an optional touchscreen note.
 
-![Station-specific failure selection](docs/images/v1.2.1/station-failure-selection.png)
+![Station-specific failure selection](docs/images/v1.2.2/station-failure-selection.png)
 
 ### 2. Report the interruption
 
@@ -265,7 +271,7 @@ Read the complete [operator guide](docs/operator-guide.md).
 Reporting, repair and production release do not wait
 for a remote record ID. A durable local journal sends supported operations through
 one independent background worker, respects quota pauses and resumes after restart.
-Touch the queued-updates strip for **Saved updates**; uncertain non-idempotent
+Touch the compact **Delivery** control for saved updates; uncertain non-idempotent
 writes require review instead of blind replay. See
 [offline reporting, capacity limits and recovery](docs/offline-delivery.md).
 
@@ -279,7 +285,7 @@ fills the kiosk; long forms have touch-sized Previous/Next controls and optional
 drag/wheel movement, while dialogs keep their action buttons visible.
 See [adaptive kiosk layouts and commissioning](docs/adaptive-kiosk.md) for the
 usability minimum, native preview images, verification and physical-screen checks.
-All linked interface images were refreshed from the released v1.2.1 source,
+All linked interface images were refreshed from the released v1.2.2 source,
 including group, self-fix, crew, failure catalogue and Settings screens.
 
 The production map is a unidirectional line. Conveyor rollers, drive elements,
@@ -289,7 +295,7 @@ borders, motion, and color so color is never the only signal. Layout derives fro
 active window dimensions rather than a hardcoded resolution, and dialogs remain
 inside the current display.
 
-![Version 1.2.1 single-line conveyor renderer animation](docs/images/v1.2.1/conveyor-motion.webp)
+![Version 1.2.2 single-line conveyor renderer animation](docs/images/v1.2.2/conveyor-motion.webp)
 
 This clip uses real application-rendered frames at fixed 24-fps animation steps.
 It is downsampled from native 1600×960 frames to reduce download size; none of the
@@ -313,12 +319,12 @@ fullscreen inside the same kiosk, never in an independent desktop window.
 | Connector | Discovered files, validation results, application request budget, departmental destinations and saved-team refresh |
 | Stations & failures | Any number of named stations and each station's own failure list |
 | Messages | Event titles, descriptions and support-message templates |
-| System | Security, sound, animation and read-only automatic device-care status (v1.2.1) |
+| System | Security, sound, animation and read-only automatic device-care status (v1.2.2) |
 | Colors | Consistent display palette |
 
 [Automatic device care](docs/automatic-device-care.md) explains disk budgets,
 adaptive retention, cleanup boundaries and warnings. Log tuning is no longer an
-operator task in v1.2.1; pending reports are never removed to free space.
+operator task in v1.2.2; pending reports are never removed to free space.
 
 [Saved team members](docs/team-roster.md) explains the daily refresh, manual
 **Refresh team members** control and offline behavior. Names are cached in private
@@ -327,9 +333,9 @@ runtime state, not inserted into the connector or editable configuration.
 <details>
 <summary>View high-resolution Settings screenshots</summary>
 
-![General terminal settings](docs/images/v1.2.1/settings-line.png)
-![Connector discovery and configuration status](docs/images/v1.2.1/settings-connector.png)
-![Station-specific failure configuration](docs/images/v1.2.1/settings-stations.png)
+![General terminal settings](docs/images/v1.2.2/settings-line.png)
+![Connector discovery and configuration status](docs/images/v1.2.2/settings-connector.png)
+![Station-specific failure configuration](docs/images/v1.2.2/settings-stations.png)
 
 </details>
 
@@ -533,17 +539,17 @@ docs/                                operations, API, assurance, and user docs
 ## Documentation and project policy
 
 - [Operator guide](docs/operator-guide.md)
-- [Adaptive kiosk layouts and native previews — v1.2.1](docs/adaptive-kiosk.md)
+- [Adaptive kiosk layouts and native previews — v1.2.2](docs/adaptive-kiosk.md)
 - [Rendering, touch feedback and measured performance](docs/ui-performance.md)
 - [Prebuilt Raspberry Pi installation](docs/prebuilt-raspberry-pi.md)
 - [Update guide](docs/update-user-guide.md) and [offline software updates](docs/software-updates.md)
 - [Offline reporting and saved-update recovery](docs/offline-delivery.md)
 - [Version 1.1.0 release notes](docs/releases/v1.1.0.md)
-- [Version 1.2.1 release notes](docs/releases/v1.2.1.md)
+- [Version 1.2.2 release notes](docs/releases/v1.2.2.md)
 - [Version 1.0.0 release notes](docs/releases/v1.0.0.md)
 - [Configuration](docs/configuration.md) and [Connector v1](docs/connector.md)
-- [Saved team members and daily directory refresh](docs/team-roster.md) — v1.2.1
-- [Per-station failure reasons](docs/failure-reasons.md) and [independent production groups](docs/station-groups.md) — v1.2.1
+- [Saved team members and daily directory refresh](docs/team-roster.md) — v1.2.2
+- [Per-station failure reasons](docs/failure-reasons.md) and [independent production groups](docs/station-groups.md) — v1.2.2
 - [Sound](docs/sound.md), [Accessibility evidence](docs/accessibility.md), [Architecture](docs/architecture.md), and [Operations](docs/operations.md)
 - [Requirements traceability](docs/traceability.md) and [product lifecycle](docs/lifecycle.md)
 - [Building from source](docs/building.md) and [verification scope](docs/verification.md)

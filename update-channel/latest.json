@@ -1,42 +1,43 @@
 {
   "archive": {
-    "name": "floorterminal-v1.2.1-linux-arm64.tar.gz",
-    "sha256": "1f5ab14c3c3a998b90d587d6bece38d6a872122e815f8eb8c6dbb61159ea1509"
+    "name": "floorterminal-v1.2.2-linux-arm64.tar.gz",
+    "sha256": "f1b8e61ab1ce939c2d393249a9a6f742b8e821c277c66e4693940757b4e195fe"
   },
   "document_type": "update_channel",
   "product_id": "floorterminal",
-  "published_utc": "2026-11-04T14:59:05Z",
+  "published_utc": "2026-11-05T17:27:26Z",
   "release": {
     "artifact": {
       "name": "floorterminal",
-      "sha256": "16dacdc09dcafb69918f2b298473b633950adbb58c8ad5431e48204d7f49fddd",
-      "size_bytes": 15277200
+      "sha256": "7ce1f2c5e222c246f5a591c951c6ce0289cad71170dd262cabe3a4593f71e7cd",
+      "size_bytes": 15282560
     },
     "features": [
-      "Dedicated HH:MM:SS local-time card separated from line names and status notices",
-      "Three configurable support shortcuts with independent labels, message destinations and visibility",
-      "Information tabs for project overview, contact, MIT license and safe deployment",
-      "Balanced number/QWERTY rows and a separate complete symbol keyboard"
+      "Compact delivery control with counts instead of a persistent full-width warning bar",
+      "Delivery centre shows destination, saved message, time, attempts and recovery guidance",
+      "Administrator-authorized dismissal of reviewed chat notices with retained audit evidence",
+      "Measured responsive cards for Information and Software Update screens"
     ],
     "fixes": [
-      "Keep failure-choice cards equal in size, including incomplete rows, with a separate selection toolbar",
-      "Keep touch targets stationary while showing press, release and contact acknowledgement",
-      "Use available Update-panel space for version cards and correctly sized action rows",
-      "Keep section headings beside their explanations when paginating information",
-      "Preserve existing incident assignment and automatic notifications when customizing manual support calls",
-      "Retain the original destination of already queued support messages after Settings edits"
+      "Refresh corrected recipient directories instead of trusting stale ambiguous names",
+      "Hold unexpected successful HTTP responses for review instead of automatically repeating a possibly accepted message",
+      "Route new support calls through the current connector without changing existing incident routing",
+      "Allow reviewed, unexpired help requests to be retried from the delivery screen",
+      "Make stale help notices reviewable during outages or quota pauses, and do not claim external delivery in standalone mode",
+      "Do not mistake ordinary message text containing local: for a pending record identifier",
+      "Confirm help delivery only after the service response has been saved"
     ],
     "minimum_upgradable_version": "1.0.0",
-    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.1",
-    "release_summary": "Refined kiosk interaction with a dedicated seconds clock, balanced touch keyboard, consistent failure choices, configurable support shortcuts and clearer information and update pages.",
-    "release_title": "FloorTerminal 1.2.1",
-    "released_utc": "2026-11-04T14:47:02Z",
+    "notes_url": "https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.2",
+    "release_summary": "More reliable message delivery and review, a compact delivery centre, and responsive information and software-update cards.",
+    "release_title": "FloorTerminal 1.2.2",
+    "released_utc": "2026-11-05T16:26:07Z",
     "security": [
-      "Support configuration validates labels, destinations, visibility and the exact three-slot structure",
-      "Administrator authorization, connector capability checks and signed-update verification remain enforced",
-      "Release packages contain neutral disabled connectors and no deployment credentials or private signing keys"
+      "Message dismissal never removes incident records, equipment transitions or active deliveries",
+      "Uncertain non-idempotent writes remain protected against automatic duplicate retries",
+      "No connector credentials or customer setup are included in source, captures or build output"
     ],
-    "version": "1.2.1"
+    "version": "1.2.2"
   },
   "schema_version": 1,
   "targets": [

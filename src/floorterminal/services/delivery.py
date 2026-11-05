@@ -8,6 +8,7 @@ uncertain non-idempotent writes are retained for review, not blindly repeated.
 from __future__ import annotations
 
 import queue
+import re
 import threading
 import time
 from copy import deepcopy
@@ -33,6 +34,9 @@ CAPABILITIES = {
     "set_asset_status": "supports_asset_status",
     "send_message": "supports_messaging",
 }
+LOCAL_REFERENCE = re.compile(
+    r"local:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+)
 
 
 class DeferredIntegration:
@@ -178,7 +182,7 @@ class DeferredIntegration:
         from ..core.topology import scope_text
 
         scope = scope_text(self.app.state.get("incident_scope"))
-        if scope and scope not in content:
+        if entry.get("kind") != "support" and scope and scope not in content:
             content += "\n" + scope
         # Help requests become stale; retain them visibly for review on expiry.
         self._queue(
@@ -186,6 +190,9 @@ class DeferredIntegration:
             (entry["chat"], content),
             {"idempotency_key": entry["id"]},
             entry.get("expires_at") if entry.get("kind") == "support" else None,
+            # A new manual call uses the currently selected connection, not an
+            # older incident's frozen routing. Lifecycle notifications retain it.
+            incident={} if entry.get("kind") == "support" else None,
         )
 
 
@@ -380,6 +387,16 @@ class DeliveryCoordinator(RosterCoordinatorMixin):
                 result = self.results.get_nowait()
             except queue.Empty:
                 return
+            help_notice = next(
+                (
+                    item
+                    for item in self.app.state.get("delivery_outbox", [])
+                    if item["id"] == result[0]
+                    and item["method"] == "send_message"
+                    and item["expires_at"] is not None
+                ),
+                None,
+            )
 
             def acknowledge():
                 if result[0] == "roster":
@@ -391,6 +408,16 @@ class DeliveryCoordinator(RosterCoordinatorMixin):
                 self.active = None
                 if result[0] == "roster":
                     self._roster_received(*result[1:])
+                elif help_notice is not None:
+                    if result[2] is None:
+                        self.app.notify(
+                            "Help message delivered to the service", "success", 5
+                        )
+                        self.app.play_sound("support")
+                    elif help_notice["phase"] == "attention":
+                        self.app.notify(
+                            "Help delivery needs review • open Delivery", "info", 6
+                        )
 
             def failed(_error):
                 # Retry the local acknowledgement, never resend a successful
@@ -411,6 +438,28 @@ class DeliveryCoordinator(RosterCoordinatorMixin):
             return
         self.next_poll = time.monotonic() + 0.5
         entries = self.app.state.get("delivery_outbox", [])
+        expired = next(
+            (
+                item
+                for item in entries
+                if item["phase"] == "queued"
+                and item["expires_at"] is not None
+                and time.time() >= item["expires_at"]
+            ),
+            None,
+        )
+        if expired is not None:
+            # Stale calls must become reviewable even with no connector or while
+            # the remote quota is paused. Expiration itself uses no network.
+            def expire():
+                expired["phase"], expired["error"] = (
+                    "attention",
+                    "Help request expired; use the site's escalation process",
+                )
+                self.app.save_state()
+
+            self.app.perform("Saving expired help notice", expire, quiet=True)
+            return
         keys = {item["id"] for item in entries}
         self.deadlines = {
             key: value
@@ -451,22 +500,11 @@ class DeliveryCoordinator(RosterCoordinatorMixin):
                 blocked_streams.add(stream)
             if item["phase"] != "queued" or not self._due(item):
                 continue
-            if item["expires_at"] is not None and time.time() >= item["expires_at"]:
-
-                def expire(item=item):
-                    item["phase"], item["error"] = (
-                        "attention",
-                        "Help request expired; use the site's escalation process",
-                    )
-                    self.app.save_state()
-
-                self.app.perform("Saving expired help notice", expire, quiet=True)
-                return
             if item["binding"] and item["binding"] != binding(remote):
                 continue
             if not getattr(remote.INFO, CAPABILITIES[item["method"]], False):
                 continue
-            if LOCAL_PREFIX in str(item["args"]):
+            if LOCAL_REFERENCE.search(str(item["args"])):
                 # Creation must be acknowledged before dependent writes.
                 continue
             self._start(remote, item)
@@ -571,6 +609,12 @@ class DeliveryCoordinator(RosterCoordinatorMixin):
                 "This help request expired. Call support again with current conditions."
             )
         item.update(phase="queued", error="", next_at=0)
+        if item["method"] == "send_message":
+            from ..integration.directory import refresh_completed
+
+            remote = getattr(self.app.provider, "remote", None)
+            if remote is not None and hasattr(remote, "directory_progress"):
+                refresh_completed(remote, {"conversations", "users"})
         self.app.save_state()
         self.app.logger.log(
             "delivery_retry_authorized",
@@ -598,6 +642,32 @@ class DeliveryCoordinator(RosterCoordinatorMixin):
             delivery_id=item_id,
             target=item["args"][0],
             created_at=item["created_at"],
+        )
+        entries.remove(item)
+        self.app.save_state()
+
+    def dismiss_reviewed_message(self, item_id, administrator):
+        """Archive a reviewed chat notice; never discard records or asset writes.
+
+        The protected UI requires external verification first. This records a
+        dismissal, NOT proof of successful delivery; audit history is retained.
+        """
+        if self.app.busy:
+            raise RuntimeError("Wait for the local operation to finish")
+        entries = self.app.state.get("delivery_outbox", [])
+        item = next((entry for entry in entries if entry["id"] == item_id), None)
+        if not item or item["phase"] != "attention" or item["method"] != "send_message":
+            raise RuntimeError("Only a held message can be dismissed after review")
+        self.app.logger.log(
+            "message_dismissed_after_review",
+            administrator=administrator,
+            delivery_id=item_id,
+            target=item["args"][0],
+            content=item["args"][1],
+            created_at=item["created_at"],
+            attempts=item["attempts"],
+            last_error=item["error"],
+            outcome="dismissed_not_confirmed",
         )
         entries.remove(item)
         self.app.save_state()

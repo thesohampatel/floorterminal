@@ -27,7 +27,7 @@ also offers Engineering help or operator self-fix; the operator name remains
 optional. See [the short touch paths](operator-touch-flow.md) for exact controls.
 
 The terminal records DOWN and its delivery instructions locally before network
-work. The queued-updates strip opens **Saved updates**. Delivery runs separately
+work. The compact **Delivery** control opens the delivery centre. Delivery runs separately
 from operator actions, respects the request budget and service delays, and reuses
 stable idempotency keys. See [offline delivery and recovery](offline-delivery.md).
 

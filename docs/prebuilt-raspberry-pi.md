@@ -8,7 +8,7 @@ external-system connector.
 ## Supported deployment baseline
 
 - 64-bit Raspberry Pi OS on an AArch64 Raspberry Pi;
-- Raspberry Pi 5 is the validated production target; version 1.2.1 is built on
+- Raspberry Pi 5 is the validated production target; version 1.2.2 is built on
   Raspberry Pi OS based on Debian 13 (Trixie), with glibc 2.41;
 - a graphical desktop/compositor session because Tk needs a display server;
 - 7-inch, 10.1-inch, or another commissioned touch display;
@@ -22,11 +22,11 @@ start on an older image, update the supported OS or build from source on that ta
 
 ## 1. Download the release
 
-**Already running v1.2.0?** Use the [normal signed USB upgrade](update-user-guide.md)
-to 1.2.1. Preserve your deployment files and Settings password; the installation
+**Already running v1.2.0 or v1.2.1?** Use the [normal signed USB upgrade](update-user-guide.md)
+to 1.2.2. Preserve your deployment files and Settings password; the installation
 archive is primarily for a new terminal. Obtain each archive and checksum together.
 
-Open the [v1.2.1 release](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.1)
+Open the [v1.2.2 release](https://github.com/thesohampatel/floorterminal/releases/tag/v1.2.2)
 and download both the Linux ARM64 archive and its separately published SHA-256
 checksum file. Do not download source-code archives when you need
 the ready-to-run executable.
@@ -34,15 +34,15 @@ the ready-to-run executable.
 The published installation files are:
 
 ```text
-floorterminal-v1.2.1-linux-arm64.tar.gz
-floorterminal-v1.2.1-linux-arm64.tar.gz.sha256
+floorterminal-v1.2.2-linux-arm64.tar.gz
+floorterminal-v1.2.2-linux-arm64.tar.gz.sha256
 ```
 
 Transfer the files to the Pi with a browser, managed deployment system, removable
 media, or `scp`. Example from another computer:
 
 ```bash
-scp floorterminal-v1.2.1-linux-arm64* pi@PI_ADDRESS:~/Downloads/
+scp floorterminal-v1.2.2-linux-arm64* pi@PI_ADDRESS:~/Downloads/
 ```
 
 ## 2. Verify before extraction
@@ -51,7 +51,7 @@ Verify the supplied archive checksum before extracting:
 
 ```bash
 cd ~/Downloads
-sha256sum -c floorterminal-v1.2.1-linux-arm64.tar.gz.sha256
+sha256sum -c floorterminal-v1.2.2-linux-arm64.tar.gz.sha256
 ```
 
 Compare the displayed digest with the value shown on the trusted GitHub Release over
@@ -61,8 +61,8 @@ Extract the versioned top-level directory:
 
 ```bash
 cd ~/Downloads
-tar -xzf floorterminal-v1.2.1-linux-arm64.tar.gz
-cd floorterminal-v1.2.1-linux-arm64
+tar -xzf floorterminal-v1.2.2-linux-arm64.tar.gz
+cd floorterminal-v1.2.2-linux-arm64
 ```
 
 The bundle's checksum manifest detects changes to every delivered file:

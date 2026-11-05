@@ -159,7 +159,7 @@ class PanelDrawingTests(unittest.TestCase):
         harness.draw_update_panel()
         self.assertNotIn("update_install", harness.hitboxes)
         self.assertNotIn("update_rollback", harness.hitboxes)
-        self.assertIn("OFFLINE UPDATES", harness.texts)
+        self.assertIn("Next step", harness.texts)
 
         harness = ViewHarness(
             status(level=LEVEL_ATTENTION, staged=staged(), managed=True)
@@ -223,10 +223,20 @@ class PanelDrawingTests(unittest.TestCase):
                 self.assertEqual(leaked, [], f"unresolved catalogue keys: {leaked}")
                 self.assertTrue(drawn)
 
-    def test_the_status_page_always_states_how_to_update_and_whom_to_contact(self):
+    def test_status_explains_next_step_and_version_tab_preserves_setup_and_contact(self):
         harness = ViewHarness(status(level=LEVEL_UNKNOWN))
         harness.draw_update_panel()
         joined = " ".join(harness.texts)
+        self.assertIn("Scan drive", joined)
+        self.assertIn("configuration and connectors are preserved", joined)
+        harness = ViewHarness(status(level=LEVEL_UNKNOWN), "version")
+        # Inspect all pages, not only the first screenful of release capabilities.
+        all_text = []
+        for page in range(20):
+            harness.modal["layout_page"] = page
+            harness.draw_update_panel()
+            all_text.extend(harness.texts)
+        joined = " ".join(all_text)
         self.assertIn(trust.RELEASES_URL, joined)
         self.assertIn(trust.UPDATE_VOLUME_LABELS[0], joined)
         self.assertIn(trust.UPDATE_PACKAGE_DIRNAME, joined)

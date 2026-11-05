@@ -77,9 +77,9 @@ using a disposable 53-reason catalogue and no network connection. Landscape and
 portrait show different capacities with the same fixed report controls. They are
 native captures, not upscaled mockups; see [image provenance](images/README.md).
 
-![53-reason catalogue in an 800×480 kiosk viewport](images/v1.2.1/failures/failure-reasons-800x480.png)
+![53-reason catalogue in an 800×480 kiosk viewport](images/v1.2.2/failures/failure-reasons-800x480.png)
 
-![The same catalogue in a 480×800 portrait kiosk viewport](images/v1.2.1/failures/failure-reasons-480x800.png)
+![The same catalogue in a 480×800 portrait kiosk viewport](images/v1.2.2/failures/failure-reasons-480x800.png)
 
 ## Storage, integration and compatibility
 

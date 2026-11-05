@@ -64,7 +64,7 @@ class InformationViewMixin:
                 ),
             ],
         }
-        self.paragraph_page(
+        self.content_cards(
             (a, b + 128, c, d), sections.get(page, sections["overview"])
         )
         self.dialog_actions(footer, [("cancel", self.t("close"), None, self.TEXT)])

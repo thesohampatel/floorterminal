@@ -1,5 +1,62 @@
 # Release verification
 
+## v1.2.2 release verification — 5 November 2026
+
+The native ARM64 release was built and checked on Raspberry Pi 5 / 64-bit Raspberry
+Pi OS (Debian 13, glibc 2.41), Python 3.13.5 / Tk 8.6, with PyInstaller 6.21.0.
+
+- **766 tests pass with zero skips** on the real Raspberry Pi 5 graphical
+  session before compilation. The Mac run passes the same suite with **28 GUI
+  skips**, covered by the Pi run. Ruff 0.17.3 and the offline publication audit pass.
+- New regressions cover stale ambiguous recipients, unexpected successful HTTP
+  statuses, standalone-mode help, offline expiry, current-connector help routing,
+  ordinary `local:` message text, protected dismissal, retained audit evidence,
+  retry visibility and signed-update health-trial restrictions.
+- One explicitly authorized live commissioning check used a privately supplied
+  connector: both recipient directories loaded, and three labelled test messages
+  were accepted with HTTP 201 through the saved help-call queue. The queue drained.
+  This used **five requests**, limited to **four in a rolling minute**; an earlier
+  read-only diagnostic used two GETs. No incidents, asset transitions or production
+  alerts were submitted. The private inputs were not edited, committed, shipped,
+  copied to the Pi, or used for documentation captures. This is a narrow messaging
+  check, not certification of every service, permission or network condition.
+- The compiled **ARM64 executable** passes native **1920×1200** fullscreen,
+  animation, Information, authorized Settings and Version-panel checks, plus two
+  standalone incident cycles, abrupt-restart recovery and operator-to-Engineering
+  handover on the original incident. No callback, rendering or state-save errors
+  were recorded; those acceptance runs made no real service calls.
+- An actual **v1.2.1 → v1.2.2 → v1.2.1 → v1.2.2** executable round trip passes
+  activation, compatibility probes and rollback in disposable storage. Both
+  connector files stay byte-identical, extensions survive, and edits saved with
+  the published v1.2.1 configuration writer survive the return upgrade. This test
+  uses an ephemeral signing fixture; the final release package is separately
+  verified against the production pinned public key.
+- A ten-second native sample produces **302 frames**, **2.95 ms p95 render-call
+  time**, a **27.69 ms maximum heartbeat gap**, and **9.96% process CPU**. A static
+  dialog produces two frames in two seconds. First Settings construction takes
+  **1,542 ms**, with initial feedback after **123 ms** and a **502 ms** maximum
+  construction-time event gap. These are short observations, not guaranteed
+  touch latency or multi-month endurance results; first Settings opening is not
+  instantaneous.
+- **147 neutral media assets** were regenerated from the final source on the Pi.
+  Their [manifest](images/v1.2.2/manifest.json) records dimensions, hashes and the
+  matching source-input digest. No customer screenshots are included.
+- The audited **14-file runtime bundle** and signed USB package contain no
+  source, logs, saved incidents, enabled connector or customer credentials. The
+  four prepared download files pass archive, checksum, signature, neutral-template
+  and source-matched build-record checks. The private signing key stays on the Mac.
+  The reviewed source secret scan finds no secrets.
+
+Build ID: `2c39ff36-74b7-4a32-95ee-40af67bdc6c9`.
+Source-input SHA-256:
+`8df2402acd85110adee7a0c81a6541f1c23820896c13c8c3815b7adeb9bbcbdd`.
+Executable SHA-256:
+`7ce1f2c5e222c246f5a591c951c6ce0289cad71170dd262cabe3a4593f71e7cd`.
+
+Existing kiosk installations and their data were not replaced. Physical touch
+commissioning, site permissions, real outage drills and long-duration operation
+remain deployment checks; these results are not a guarantee of zero defects.
+
 ## v1.2.1 release verification — 4 November 2026
 
 The native ARM64 release was built on Raspberry Pi 5 / 64-bit Raspberry Pi OS
